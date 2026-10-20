@@ -321,6 +321,23 @@
   let peer = null;
   let isHost = false;
   let myName = 'Guest';
+  let guestConn = null;
+  let guestWired = false;
+
+  // STUN + TURN so guests on mobile data / strict networks can still connect.
+  // The openrelay TURN is a free public one. For a reliable setup, create a free
+  // account at metered.ca and put your own TURN credentials here.
+  const PEER_OPTS = {
+    debug: 1,
+    config: {
+      iceServers: [
+        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:global.stun.twilio.com:3478'] },
+        { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'],
+          username: 'openrelayproject', credential: 'openrelayproject' }
+      ],
+      iceCandidatePoolSize: 4
+    }
+  };
 
   /* ---------- helpers ---------- */
   function showError(t) { $('landingError').textContent = t; }
@@ -395,6 +412,8 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && room.classList.contains('on')) {
       keepAwake();
+      if (peer && peer.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} }
+      if (fb && fb.ac.state === 'suspended') fb.ac.resume().catch(() => {});
       if (!isHost && video.srcObject && video.paused) video.play().catch(() => {});
     }
   });
@@ -422,36 +441,89 @@
     calls.set(id, call);
     call.on('close', () => { if (calls.get(id) === call) calls.delete(id); });
   }
-  function canCapture() {
+  function canCaptureNative() {
     const p = HTMLMediaElement.prototype;
     return ('captureStream' in p) || ('mozCaptureStream' in p);
   }
+  function canCaptureCanvas() {
+    const c = document.createElement('canvas');
+    return !!(c.captureStream && (window.AudioContext || window.webkitAudioContext));
+  }
+  function canCapture() { return canCaptureNative() || canCaptureCanvas(); }
+
+  // iPhone Safari has no video.captureStream(). Instead we draw the video onto a
+  // canvas (canvas.captureStream works on iOS) and take the sound through WebAudio.
+  let fb = null;
+  function prepareFallback() {
+    if (fb) { if (fb.ac.state === 'suspended') fb.ac.resume().catch(() => {}); return fb; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const cv = document.createElement('canvas');
+    cv.width = 640; cv.height = 360;
+    const g = cv.getContext('2d');
+    const ac = new AC();
+    const src = ac.createMediaElementSource(video);   // can only be done once per element
+    const dest = ac.createMediaStreamDestination();
+    src.connect(dest);
+    src.connect(ac.destination);                      // host still hears the movie
+    fb = { cv, g, ac, dest };
+    const MAXW = 960;                                 // keep it light for phone uplinks
+    const draw = () => {
+      if (video.videoWidth && !video.paused && !video.ended && video.readyState >= 2) {
+        const k = Math.min(1, MAXW / video.videoWidth);
+        const w = Math.round(video.videoWidth * k), h = Math.round(video.videoHeight * k);
+        if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+        try { g.drawImage(video, 0, 0, w, h); } catch (e) {}
+      }
+      requestAnimationFrame(draw);
+    };
+    requestAnimationFrame(draw);
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+    return fb;
+  }
   function captureHostStream() {
-    return video.captureStream ? video.captureStream()
-         : video.mozCaptureStream ? video.mozCaptureStream() : null;
+    if (video.captureStream) return video.captureStream();
+    if (video.mozCaptureStream) return video.mozCaptureStream();
+    if (!canCaptureCanvas()) return null;
+    const f = prepareFallback();
+    const stream = f.cv.captureStream(30);
+    f.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+    return stream;
   }
 
   function startHost() {
     isHost = true;
     myName = ($('hostName').value.trim() || 'Host');
     const code = randomCode();
-    peer = new Peer(PREFIX + code);
+    peer = new Peer(PREFIX + code, PEER_OPTS);
+    let opened = false;
 
     peer.on('open', () => {
+      if (opened) { setStatus('Room ' + code, 'live'); return; }   // fired again after a reconnect
+      opened = true;
       enterRoom();
       $('hostTools').hidden = false;
       video.controls = true;
-      const link = location.origin + location.pathname + '?room=' + code;
+      const link = location.href.split('#')[0].split('?')[0] + '?room=' + code;
       $('shareLink').textContent = link;
-      if (navigator.share) $('copyLink').textContent = 'Share invite link';
+      if (!/^https?:$/.test(location.protocol)) {
+        addMsg('', 'This page is opened from a file. Upload it to a website (https) so the invite link works for guests.', true);
+      }
+      const canShare = !!navigator.share;
+      if (canShare) $('copyLink').textContent = 'Share invite link';
       $('copyLink').onclick = async () => {
-        const label = navigator.share ? 'Share invite link' : 'Copy invite link';
-        try {
-          if (navigator.share) { await navigator.share({ title: 'Watch Party', text: 'Join my watch party', url: link }); }
-          else { await navigator.clipboard.writeText(link); $('copyLink').textContent = 'Copied'; }
-        } catch (e) {
-          if (e && e.name !== 'AbortError' && !navigator.share) window.prompt('Copy this link', link);
+        const label = canShare ? 'Share invite link' : 'Copy invite link';
+        let done = false;
+        // 1) native share sheet (iOS / Android). Must be the first await in the tap.
+        if (canShare) {
+          try { await navigator.share({ title: 'Watch Party', text: 'Join my watch party', url: link }); done = true; }
+          catch (e) { if (e && e.name === 'AbortError') done = true; }
         }
+        // 2) clipboard
+        if (!done) {
+          try { await navigator.clipboard.writeText(link); done = true; $('copyLink').textContent = 'Copied'; } catch (e) {}
+        }
+        // 3) last resort: select-and-copy prompt
+        if (!done) window.prompt('Copy this link', link);
         setTimeout(() => $('copyLink').textContent = label, 1800);
       };
       setStatus('Room ' + code, 'live');
@@ -465,13 +537,25 @@
         addMsg('', 'Hosting needs Chrome, Edge or Firefox on a computer or Android phone.', true);
       } else {
         setOverlay('Choose a video file', 'Pick a file below. Guests can join before you start.');
+        if (!canCaptureNative()) addMsg('', 'Hosting from iPhone: keep this tab open and the screen on while you play.', true);
       }
     });
 
     peer.on('error', err => {
       if (err.type === 'unavailable-id') { peer.destroy(); startHost(); return; }
+      if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
+        setStatus('Reconnecting…', 'paused');
+        setTimeout(() => { if (peer && peer.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } }, 2000);
+        return;
+      }
+      if (err.type === 'peer-unavailable') return;   // a guest vanished, ignore
       setStatus('Connection problem', 'paused');
       addMsg('', 'Error: ' + err.type, true);
+    });
+    // Signalling link dropped (phone slept, network changed): get the room code back
+    peer.on('disconnected', () => {
+      setStatus('Reconnecting…', 'paused');
+      setTimeout(() => { if (peer && peer.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } }, 1000);
     });
 
     peer.on('connection', conn => {
@@ -510,6 +594,7 @@
       calls.clear();
       hostStream = null;
       video.src = URL.createObjectURL(f);
+      if (!canCaptureNative() && canCaptureCanvas()) { try { prepareFallback(); } catch (err) {} }
       $('fileName').textContent = f.name;
       setOverlay(null);
       video.load();
@@ -520,6 +605,7 @@
     // First time the video actually plays, start streaming it to guests
     video.addEventListener('playing', () => {
       keepAwake();
+      if (fb && fb.ac.state === 'suspended') fb.ac.resume().catch(() => {});
       if (!hostStream || hostStream.getTracks().length === 0) {
         hostStream = captureHostStream();
         if (!hostStream) return;
@@ -549,18 +635,32 @@
     showError('');
     $('btnJoin').disabled = true;
 
-    peer = new Peer();
+    if (peer) { try { peer.destroy(); } catch (e) {} }
+    peer = new Peer(PEER_OPTS);
     let conn = null;
+    let joined = false;
+    const fail = msg => {
+      if (joined) return;
+      clearTimeout(timer);
+      $('btnJoin').disabled = false;
+      showError(msg);
+      if (peer) { try { peer.destroy(); } catch (e) {} }
+    };
+    const timer = setTimeout(() => fail('Could not reach the host. Check the code, make sure the host page is open, then try again.'), 20000);
 
     peer.on('open', () => {
       conn = peer.connect(PREFIX + code, { metadata: { name: myName }, reliable: true });
+      guestConn = conn;
+      conn.on('error', () => fail('Connection to the host failed. Please try again.'));
 
       conn.on('open', () => {
+        joined = true;
+        clearTimeout(timer);
         enterRoom();
         $('guestTools').hidden = false;
         video.controls = false;
         setStatus('Connected', 'live');
-        setOverlay('Waiting for the host', 'The movie will appear here when the host presses play.');
+        if (!video.srcObject) setOverlay('Waiting for the host', 'The movie will appear here when the host presses play.');
         addMsg('', 'You joined room ' + code + '.', true);
         keepAwake();
       });
@@ -584,6 +684,7 @@
 
     peer.on('call', call => {
       call.answer();
+      call.on('error', () => addMsg('', 'Video connection problem. Ask the host to press play again.', true));
       call.on('stream', stream => {
         video.srcObject = stream;
         setOverlay(null);
@@ -600,12 +701,14 @@
     });
 
     peer.on('error', err => {
-      $('btnJoin').disabled = false;
-      if (err.type === 'peer-unavailable') showError('Room not found. Check the code, and make sure the host page is still open.');
-      else showError('Could not connect (' + err.type + ').');
+      if (joined) { addMsg('', 'Connection problem (' + err.type + ').', true); return; }
+      if (err.type === 'peer-unavailable') fail('Room not found. Check the code, and make sure the host page is still open.');
+      else fail('Could not connect (' + err.type + ').');
     });
+    peer.on('disconnected', () => { if (peer && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
 
-    // Guest controls
+    // Guest controls (wired only once, even if joining is retried)
+    if (!guestWired) { guestWired = true;
     tapPlay.addEventListener('click', () => {
       video.muted = false;
       $('muteBtn').textContent = 'Mute';
@@ -636,6 +739,7 @@
     video.addEventListener('pause', () => {
       if (!isHost && video.srcObject && video.srcObject.active) video.play().catch(() => {});
     });
+    }
   }
 
   /* ---------- chat ---------- */
@@ -648,8 +752,7 @@
       addMsg(myName, text);
       broadcast({ type: 'chat', name: myName, text });
     } else if (peer) {
-      const c = Object.values(peer.connections).flat().find(x => x.type === 'data' && x.open);
-      if (c) c.send({ type: 'chat', name: myName, text });
+      if (guestConn && guestConn.open) guestConn.send({ type: 'chat', name: myName, text });
     }
   });
 
