@@ -324,20 +324,45 @@
   let guestConn = null;
   let guestWired = false;
 
-  // STUN + TURN so guests on mobile data / strict networks can still connect.
-  // The openrelay TURN is a free public one. For a reliable setup, create a free
-  // account at metered.ca and put your own TURN credentials here.
-  const PEER_OPTS = {
-    debug: 1,
-    config: {
-      iceServers: [
-        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:global.stun.twilio.com:3478'] },
-        { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'],
-          username: 'openrelayproject', credential: 'openrelayproject' }
-      ],
-      iceCandidatePoolSize: 4
-    }
+  // ======================= TURN SETTINGS =======================
+  // "Connection to the host failed" means the two devices could not reach each
+  // other directly (different networks, mobile data, strict routers). A TURN relay
+  // fixes that. The old free public relay (openrelay.metered.ca) no longer works,
+  // so you need your own free one. Takes 2 minutes, pick ONE option:
+  //
+  //  OPTION A (easiest): sign up at https://dashboard.metered.ca/signup (free),
+  //    create an app, then fill in the two lines below.
+  //    meteredApp = the part before ".metered.live"  (e.g. 'mywatchparty')
+  //    meteredKey = the API key from the TURN Server page
+  //
+  //  OPTION B: paste your own ICE servers into "servers", for example:
+  //    { urls: 'turn:standard.relay.metered.ca:443', username: '...', credential: '...' }
+  const TURN = {
+    meteredApp: '',
+    meteredKey: '',
+    servers: []
   };
+  const hasTurn = () => !!(TURN.servers.length || (TURN.meteredApp && TURN.meteredKey));
+
+  let iceCache = null;
+  async function getPeerOpts() {
+    if (iceCache) return iceCache;
+    let ice = [
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:global.stun.twilio.com:3478', 'stun:stun.relay.metered.ca:80'] }
+    ].concat(TURN.servers);
+    if (TURN.meteredApp && TURN.meteredKey) {
+      try {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 6000);
+        const r = await fetch('https://' + TURN.meteredApp + '.metered.live/api/v1/turn/credentials?apiKey=' + encodeURIComponent(TURN.meteredKey), { signal: ctl.signal });
+        clearTimeout(t);
+        if (r.ok) ice = ice.concat(await r.json());
+        else console.warn('TURN credential request failed', r.status);
+      } catch (e) { console.warn('TURN credential request failed', e); }
+    }
+    iceCache = { debug: 1, config: { iceServers: ice, iceCandidatePoolSize: 4 } };
+    return iceCache;
+  }
 
   /* ---------- helpers ---------- */
   function showError(t) { $('landingError').textContent = t; }
@@ -490,11 +515,12 @@
     return stream;
   }
 
-  function startHost() {
+  async function startHost() {
     isHost = true;
     myName = ($('hostName').value.trim() || 'Host');
     const code = randomCode();
-    peer = new Peer(PREFIX + code, PEER_OPTS);
+    const opts = await getPeerOpts();
+    peer = new Peer(PREFIX + code, opts);
     let opened = false;
 
     peer.on('open', () => {
@@ -627,7 +653,7 @@
     if (t.volume === 1) $('vol').hidden = true;
   })();
 
-  function startGuest() {
+  async function startGuest() {
     const code = $('roomCode').value.trim().toLowerCase().replace(PREFIX, '');
     if (!code) { showError('Enter the room code from the host.'); return; }
     isHost = false;
@@ -635,8 +661,9 @@
     showError('');
     $('btnJoin').disabled = true;
 
+    const opts = await getPeerOpts();
     if (peer) { try { peer.destroy(); } catch (e) {} }
-    peer = new Peer(PEER_OPTS);
+    peer = new Peer(opts);
     let conn = null;
     let joined = false;
     const fail = msg => {
@@ -646,12 +673,16 @@
       showError(msg);
       if (peer) { try { peer.destroy(); } catch (e) {} }
     };
-    const timer = setTimeout(() => fail('Could not reach the host. Check the code, make sure the host page is open, then try again.'), 20000);
+    const timer = setTimeout(() => fail(hasTurn()
+      ? 'Could not reach the host. Check the code, make sure the host page is open, then try again.'
+      : 'Could not connect. If you are on a different network from the host, a TURN relay is needed: see the TURN SETTINGS near the top of the script.'), 20000);
 
     peer.on('open', () => {
       conn = peer.connect(PREFIX + code, { metadata: { name: myName }, reliable: true });
       guestConn = conn;
-      conn.on('error', () => fail('Connection to the host failed. Please try again.'));
+      conn.on('error', () => fail(hasTurn()
+        ? 'Connection to the host failed. Please try again.'
+        : 'Your network blocked the direct connection to the host. A TURN relay is needed: see the TURN SETTINGS near the top of the script.'));
 
       conn.on('open', () => {
         joined = true;
