@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12101c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Watch Party</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #12101c;
+    --surface: #1c1a2b;
+    --surface-2: #26233a;
+    --line: #34304d;
+    --text: #edeaf6;
+    --muted: #9b96b8;
+    --accent: #b8a9ff;
+    --accent-ink: #1a1530;
+    --live: #ff7a90;
+    --ok: #7fe0b5;
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; touch-action: manipulation; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  .btn {
+    border: 0;
+    border-radius: 12px;
+    min-height: 44px;
+    padding: 10px 18px;
+    font-weight: 600;
+    background: var(--surface-2);
+  }
+  .btn:hover { background: var(--line); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { background: #cabfff; }
+  .btn.block { width: 100%; }
+  .btn:disabled { opacity: .6; }
+  @media (prefers-reduced-motion: no-preference) { .btn { transition: background .15s; } }
+
+  /* ---------- Landing ---------- */
+  #landing {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: calc(var(--sat) + 24px) calc(var(--sar) + 20px) calc(var(--sab) + 24px) calc(var(--sal) + 20px);
+  }
+  .landing-inner { width: 100%; max-width: 860px; }
+  h1 {
+    font-size: clamp(2.3rem, 9vw, 5rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin: 0 0 12px;
+  }
+  .lede { color: var(--muted); font-size: 1.05rem; max-width: 46ch; margin: 0 0 28px; }
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 680px) { .choices { grid-template-columns: 1fr; } }
+  .choice {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 20px;
+  }
+  .choice h2 { margin: 0 0 4px; font-size: 1.3rem; }
+  .choice p { margin: 0 0 16px; color: var(--muted); font-size: .95rem; }
+  .field { display: block; margin-bottom: 12px; }
+  .field span { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+  input[type="text"] {
+    width: 100%;
+    min-height: 46px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 16px; /* stops iOS zooming into inputs */
+  }
+  .error { color: var(--live); margin-top: 14px; min-height: 1.4em; }
+
+  /* ---------- Room ---------- */
+  #room { display: none; min-height: 100vh; min-height: 100dvh; }
+  #room.on { display: block; }
+
+  .topbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+    padding: calc(var(--sat) + 10px) calc(var(--sar) + 14px) 10px calc(var(--sal) + 14px);
+    max-width: 1280px; margin: 0 auto;
+  }
+  .topbar .brand { font-weight: 800; letter-spacing: -0.02em; font-size: 1.2rem; margin-right: auto; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 12px; font-size: .88rem; white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.live { background: var(--ok); }
+  .dot.paused { background: var(--live); }
+
+  .layout {
+    max-width: 1280px; margin: 0 auto;
+    padding: 0 calc(var(--sar) + 16px) calc(var(--sab) + 16px) calc(var(--sal) + 16px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 330px;
+    grid-template-areas: "stage chat" "tools chat";
+    grid-template-rows: auto 1fr;
+    gap: 14px 16px;
+  }
+  .stage-area { grid-area: stage; }
+  .tools-area { grid-area: tools; }
+  .chat { grid-area: chat; }
+
+  .stage {
+    background: #000; border-radius: 16px; overflow: hidden;
+    position: relative; aspect-ratio: 16 / 9; width: 100%;
+    border: 1px solid var(--line);
+  }
+  .stage video { width: 100%; height: 100%; background: #000; display: block; object-fit: contain; }
+  .stage:fullscreen, .stage:-webkit-full-screen {
+    aspect-ratio: auto; width: 100%; height: 100%; border-radius: 0; border: 0;
+  }
+  .overlay {
+    position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+    padding: 20px; color: var(--muted); background: rgba(10, 8, 18, .78);
+  }
+  .overlay strong { display: block; color: var(--text); font-size: 1.25rem; margin-bottom: 4px; }
+  .overlay .btn { margin-top: 14px; }
+  .badge {
+    position: absolute; top: 10px; left: 10px; z-index: 2;
+    background: rgba(18, 16, 28, .88); border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 12px; font-size: .85rem;
+  }
+  .stage:fullscreen .badge, .stage:-webkit-full-screen .badge {
+    top: calc(var(--sat) + 12px); left: calc(var(--sal) + 12px);
+  }
+
+  .tools { display: grid; gap: 12px; }
+  .under { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .under .grow { flex: 1; min-width: 180px; color: var(--muted); font-size: .92rem; overflow-wrap: anywhere; }
+  .guest-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .guest-controls input[type="range"] { width: 120px; accent-color: var(--accent); }
+  .filebtn { position: relative; overflow: hidden; display: inline-flex; align-items: center; }
+  .filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 100px; }
+
+  .share {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  }
+  .share code {
+    flex: 1; min-width: 180px; background: var(--bg); border-radius: 10px; padding: 10px 12px;
+    font-size: .85rem; overflow-wrap: anywhere; color: var(--accent);
+  }
+
+  .chat {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+    display: flex; flex-direction: column; min-height: 0;
+    height: min(640px, calc(100dvh - 90px)); align-self: start; position: sticky; top: 16px;
+  }
+  .chat h3 { margin: 0; padding: 12px 16px; font-size: 1rem; border-bottom: 1px solid var(--line); }
+  .msgs { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; -webkit-overflow-scrolling: touch; }
+  .msg { font-size: .95rem; overflow-wrap: anywhere; }
+  .msg b { color: var(--accent); font-weight: 600; }
+  .msg.sys { color: var(--muted); font-style: italic; }
+  .chat form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+  .chat form input { flex: 1; min-width: 0; }
+
+  /* ---------- Phones and small tablets ---------- */
+  @media (max-width: 900px) {
+    .layout {
+      grid-template-columns: 1fr;
+      grid-template-areas: "stage" "tools" "chat";
+      grid-template-rows: auto;
+      padding: 0 0 var(--sab) 0;
+      gap: 12px;
+    }
+    /* video stays pinned at the top while chat scrolls */
+    .stage-area {
+      position: sticky; top: 0; z-index: 10; background: #000;
+      padding: 0 var(--sar) 0 var(--sal);
+    }
+    .stage { border-radius: 0; border-left: 0; border-right: 0; }
+    .tools-area { padding: 0 calc(var(--sar) + 14px) 0 calc(var(--sal) + 14px); }
+    .chat {
+      position: static; height: 340px; align-self: stretch;
+      margin: 0 calc(var(--sar) + 14px) 14px calc(var(--sal) + 14px);
+    }
+    .guest-controls { width: 100%; }
+    .guest-controls .btn { flex: 1; }
+    .guest-controls input[type="range"] { flex: 2; width: auto; min-width: 80px; }
+    .filebtn { width: 100%; justify-content: center; }
+  }
+
+  /* Phone held sideways: video takes the whole screen height */
+  @media (max-width: 950px) and (max-height: 500px) and (orientation: landscape) {
+    .stage { aspect-ratio: auto; height: 100vh; height: 100dvh; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LANDING ============ -->
+<main id="landing">
+  <div class="landing-inner">
+    <h1>Watch together,<br>from anywhere.</h1>
+    <p class="lede">Pick a movie from your own device. Everyone in the room sees exactly what the host plays, pauses and skips.</p>
+
+    <div class="choices">
+      <section class="choice">
+        <h2>Host a room</h2>
+        <p>You choose the video and control playback for everyone.</p>
+        <label class="field"><span>Your name</span><input type="text" id="hostName" maxlength="20" placeholder="Host" autocomplete="off"></label>
+        <button class="btn primary block" id="btnHost">Create room</button>
+      </section>
+
+      <section class="choice">
+        <h2>Join a room</h2>
+        <p>Enter the room code the host shared with you.</p>
+        <label class="field"><span>Your name</span><input type="text" id="guestName" maxlength="20" placeholder="Guest" autocomplete="off"></label>
+        <label class="field"><span>Room code</span><input type="text" id="roomCode" maxlength="20" placeholder="e.g. k3x9qa" autocapitalize="off" autocorrect="off" autocomplete="off"></label>
+        <button class="btn block" id="btnJoin">Join room</button>
+      </section>
+    </div>
+    <div class="error" id="landingError" role="alert"></div>
+  </div>
+</main>
+
+<!-- ============ ROOM ============ -->
+<div id="room">
+  <div class="topbar">
+    <span class="brand">Watch Party</span>
+    <span class="pill"><span class="dot" id="statusDot"></span><span id="statusText">Connecting…</span></span>
+    <span class="pill" id="countPill">1 watching</span>
+  </div>
+
+  <div class="layout">
+    <div class="stage-area">
+      <div class="stage" id="stage">
+        <video id="video" playsinline webkit-playsinline></video>
+        <div class="badge" id="badge" hidden></div>
+        <div class="overlay" id="overlay">
+          <div>
+            <strong id="overlayTitle">Getting ready</strong>
+            <span id="overlayText"></span>
+            <div><button class="btn primary" id="tapPlay" hidden>Tap to play</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tools-area">
+      <div class="tools">
+        <!-- Host tools -->
+        <div id="hostTools" hidden>
+          <div class="under">
+            <label class="btn primary filebtn" id="fileLabel">Choose video file
+              <input type="file" id="fileInput" accept="video/*,audio/*">
+            </label>
+            <button class="btn" id="hostFs">Fullscreen</button>
+            <span class="grow" id="fileName">No file selected. Use the player controls to play, pause and seek. Guests follow you.</span>
+          </div>
+          <div class="share" style="margin-top:12px">
+            <code id="shareLink"></code>
+            <button class="btn" id="copyLink">Copy invite link</button>
+          </div>
+        </div>
+
+        <!-- Guest tools -->
+        <div id="guestTools" hidden>
+          <div class="under">
+            <span class="grow">The host controls playback. Double-tap the video for fullscreen.</span>
+            <div class="guest-controls">
+              <button class="btn" id="muteBtn">Mute</button>
+              <input type="range" id="vol" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+              <button class="btn" id="fsBtn">Fullscreen</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="chat">
+      <h3>Chat</h3>
+      <div class="msgs" id="msgs" aria-live="polite"></div>
+      <form id="chatForm">
+        <input type="text" id="chatInput" maxlength="300" placeholder="Say something" autocomplete="off" enterkeyhint="send">
+        <button class="btn primary" type="submit">Send</button>
+      </form>
+    </aside>
+  </div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const PREFIX = 'wparty-';
+
+  const landing = $('landing'), room = $('room'), video = $('video'), stage = $('stage');
+  const overlay = $('overlay'), overlayTitle = $('overlayTitle'), overlayText = $('overlayText');
+  const badge = $('badge'), statusText = $('statusText'), statusDot = $('statusDot');
+  const countPill = $('countPill'), msgs = $('msgs'), tapPlay = $('tapPlay');
+
+  let peer = null;
+  let isHost = false;
+  let myName = 'Guest';
+
+  /* ---------- helpers ---------- */
+  function showError(t) { $('landingError').textContent = t; }
+  function setStatus(text, kind) {
+    statusText.textContent = text;
+    statusDot.className = 'dot' + (kind ? ' ' + kind : '');
+  }
+  function setOverlay(title, text, withButton) {
+    if (!title) { overlay.hidden = true; tapPlay.hidden = true; return; }
+    overlay.hidden = false;
+    overlayTitle.textContent = title;
+    overlayText.textContent = text || '';
+    tapPlay.hidden = !withButton;
+  }
+  function addMsg(name, text, sys) {
+    const d = document.createElement('div');
+    d.className = 'msg' + (sys ? ' sys' : '');
+    if (sys) { d.textContent = text; }
+    else {
+      const b = document.createElement('b'); b.textContent = name + ': ';
+      d.appendChild(b); d.appendChild(document.createTextNode(text));
+    }
+    msgs.appendChild(d);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+  function showBadge(t) { badge.hidden = !t; badge.textContent = t || ''; }
+  function enterRoom() {
+    landing.style.display = 'none';
+    room.classList.add('on');
+    window.scrollTo(0, 0);
+  }
+  function randomCode() {
+    const c = 'abcdefghjkmnpqrstuvwxyz23456789';
+    let s = '';
+    for (let i = 0; i < 6; i++) s += c[Math.floor(Math.random() * c.length)];
+    return s;
+  }
+
+  /* ---------- fullscreen (works on desktop, Android and iPhone) ---------- */
+  function toggleFullscreen() {
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+    if (video.webkitDisplayingFullscreen) { video.webkitExitFullscreen(); return; }
+
+    if (stage.requestFullscreen) {
+      stage.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+    } else if (stage.webkitRequestFullscreen) {
+      stage.webkitRequestFullscreen();
+    } else if (video.webkitEnterFullscreen) {
+      // iPhone Safari only allows fullscreen on the video element itself
+      try { video.webkitEnterFullscreen(); } catch (e) {}
+    }
+  }
+  function onFsChange() {
+    const on = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    try {
+      if (on && screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+      if (!on && screen.orientation && screen.orientation.unlock) screen.orientation.unlock();
+    } catch (e) {}
+  }
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+
+  /* ---------- keep the screen awake while watching ---------- */
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && room.classList.contains('on')) {
+      keepAwake();
+      if (!isHost && video.srcObject && video.paused) video.play().catch(() => {});
+    }
+  });
+
+  /* =========================================================
+     HOST
+  ========================================================= */
+  const conns = new Map();   // peerId -> data connection
+  const calls = new Map();   // peerId -> media call
+  let hostStream = null;
+
+  function broadcast(obj) { conns.forEach(c => { if (c.open) c.send(obj); }); }
+  function updateCount() {
+    const n = conns.size + 1;
+    countPill.textContent = n + ' watching';
+    broadcast({ type: 'count', n });
+  }
+  function sendStateTo(conn) {
+    if (conn.open) conn.send({ type: 'state', playing: !video.paused && !video.ended });
+  }
+  function callGuest(id) {
+    if (!hostStream) return;
+    if (calls.has(id)) { try { calls.get(id).close(); } catch (e) {} }
+    const call = peer.call(id, hostStream);
+    calls.set(id, call);
+    call.on('close', () => { if (calls.get(id) === call) calls.delete(id); });
+  }
+  function canCapture() {
+    const p = HTMLMediaElement.prototype;
+    return ('captureStream' in p) || ('mozCaptureStream' in p);
+  }
+  function captureHostStream() {
+    return video.captureStream ? video.captureStream()
+         : video.mozCaptureStream ? video.mozCaptureStream() : null;
+  }
+
+  function startHost() {
+    isHost = true;
+    myName = ($('hostName').value.trim() || 'Host');
+    const code = randomCode();
+    peer = new Peer(PREFIX + code);
+
+    peer.on('open', () => {
+      enterRoom();
+      $('hostTools').hidden = false;
+      video.controls = true;
+      const link = location.origin + location.pathname + '?room=' + code;
+      $('shareLink').textContent = link;
+      if (navigator.share) $('copyLink').textContent = 'Share invite link';
+      $('copyLink').onclick = async () => {
+        const label = navigator.share ? 'Share invite link' : 'Copy invite link';
+        try {
+          if (navigator.share) { await navigator.share({ title: 'Watch Party', text: 'Join my watch party', url: link }); }
+          else { await navigator.clipboard.writeText(link); $('copyLink').textContent = 'Copied'; }
+        } catch (e) {
+          if (e && e.name !== 'AbortError' && !navigator.share) window.prompt('Copy this link', link);
+        }
+        setTimeout(() => $('copyLink').textContent = label, 1800);
+      };
+      setStatus('Room ' + code, 'live');
+      addMsg('', 'Room created. Share the invite link to bring people in.', true);
+
+      if (!canCapture()) {
+        // e.g. iPhone Safari cannot capture a playing video to stream it
+        $('fileLabel').hidden = true;
+        $('hostFs').hidden = true;
+        setOverlay('This browser cannot host', 'Host from a computer or an Android phone using Chrome. An iPhone works great for joining.');
+        addMsg('', 'Hosting needs Chrome, Edge or Firefox on a computer or Android phone.', true);
+      } else {
+        setOverlay('Choose a video file', 'Pick a file below. Guests can join before you start.');
+      }
+    });
+
+    peer.on('error', err => {
+      if (err.type === 'unavailable-id') { peer.destroy(); startHost(); return; }
+      setStatus('Connection problem', 'paused');
+      addMsg('', 'Error: ' + err.type, true);
+    });
+
+    peer.on('connection', conn => {
+      conn.on('open', () => {
+        conns.set(conn.peer, conn);
+        const who = (conn.metadata && conn.metadata.name) || 'A guest';
+        conn.send({ type: 'hello', host: myName });
+        sendStateTo(conn);
+        updateCount();
+        addMsg('', who + ' joined.', true);
+        broadcast({ type: 'sys', text: who + ' joined.' });
+        if (hostStream) callGuest(conn.peer);
+      });
+      conn.on('data', d => {
+        if (d && d.type === 'chat' && typeof d.text === 'string') {
+          const msg = { type: 'chat', name: String(d.name || 'Guest').slice(0, 20), text: d.text.slice(0, 300) };
+          addMsg(msg.name, msg.text);
+          broadcast(msg);
+        }
+      });
+      conn.on('close', () => {
+        conns.delete(conn.peer);
+        if (calls.has(conn.peer)) { try { calls.get(conn.peer).close(); } catch (e) {} calls.delete(conn.peer); }
+        updateCount();
+      });
+    });
+
+    $('hostFs').addEventListener('click', toggleFullscreen);
+
+    // File chosen
+    $('fileInput').addEventListener('change', e => {
+      const f = e.target.files[0];
+      if (!f) return;
+      if (video.src) URL.revokeObjectURL(video.src);
+      calls.forEach(c => { try { c.close(); } catch (err) {} });
+      calls.clear();
+      hostStream = null;
+      video.src = URL.createObjectURL(f);
+      $('fileName').textContent = f.name;
+      setOverlay(null);
+      video.load();
+      broadcast({ type: 'sys', text: 'Host loaded "' + f.name + '".' });
+      addMsg('', 'Loaded "' + f.name + '". Press play when everyone is ready.', true);
+    });
+
+    // First time the video actually plays, start streaming it to guests
+    video.addEventListener('playing', () => {
+      keepAwake();
+      if (!hostStream || hostStream.getTracks().length === 0) {
+        hostStream = captureHostStream();
+        if (!hostStream) return;
+        conns.forEach((c, id) => callGuest(id));
+      }
+    });
+    video.addEventListener('play',  () => { setStatus('Playing', 'live');  broadcast({ type: 'state', playing: true });  });
+    video.addEventListener('pause', () => { setStatus('Paused', 'paused'); broadcast({ type: 'state', playing: false }); });
+    video.addEventListener('ended', () => { setStatus('Finished', 'paused'); broadcast({ type: 'state', playing: false }); });
+  }
+
+  /* =========================================================
+     GUEST
+  ========================================================= */
+  // iPhones ignore video.volume (volume is set with the side buttons), so hide the slider there
+  (function () {
+    const t = document.createElement('video');
+    t.volume = 0.5;
+    if (t.volume === 1) $('vol').hidden = true;
+  })();
+
+  function startGuest() {
+    const code = $('roomCode').value.trim().toLowerCase().replace(PREFIX, '');
+    if (!code) { showError('Enter the room code from the host.'); return; }
+    isHost = false;
+    myName = ($('guestName').value.trim() || 'Guest');
+    showError('');
+    $('btnJoin').disabled = true;
+
+    peer = new Peer();
+    let conn = null;
+
+    peer.on('open', () => {
+      conn = peer.connect(PREFIX + code, { metadata: { name: myName }, reliable: true });
+
+      conn.on('open', () => {
+        enterRoom();
+        $('guestTools').hidden = false;
+        video.controls = false;
+        setStatus('Connected', 'live');
+        setOverlay('Waiting for the host', 'The movie will appear here when the host presses play.');
+        addMsg('', 'You joined room ' + code + '.', true);
+        keepAwake();
+      });
+
+      conn.on('data', d => {
+        if (!d) return;
+        if (d.type === 'count') countPill.textContent = d.n + ' watching';
+        else if (d.type === 'chat') addMsg(d.name, d.text);
+        else if (d.type === 'sys') addMsg('', d.text, true);
+        else if (d.type === 'state') {
+          if (d.playing) { setStatus('Playing', 'live'); showBadge(''); }
+          else { setStatus('Paused by host', 'paused'); showBadge('Paused by host'); }
+        }
+      });
+
+      conn.on('close', () => {
+        setStatus('Host left', 'paused');
+        setOverlay('The host left the room', 'Ask them for a new invite link.');
+      });
+    });
+
+    peer.on('call', call => {
+      call.answer();
+      call.on('stream', stream => {
+        video.srcObject = stream;
+        setOverlay(null);
+        video.muted = false;
+        $('muteBtn').textContent = 'Mute';
+        video.play().catch(() => {
+          // Sound autoplay blocked: start muted and ask for a tap
+          video.muted = true;
+          $('muteBtn').textContent = 'Unmute';
+          video.play().then(() => showBadge('Muted. Tap Unmute for sound'))
+            .catch(() => setOverlay('Tap to start', 'Your browser needs a tap before it plays.', true));
+        });
+      });
+    });
+
+    peer.on('error', err => {
+      $('btnJoin').disabled = false;
+      if (err.type === 'peer-unavailable') showError('Room not found. Check the code, and make sure the host page is still open.');
+      else showError('Could not connect (' + err.type + ').');
+    });
+
+    // Guest controls
+    tapPlay.addEventListener('click', () => {
+      video.muted = false;
+      $('muteBtn').textContent = 'Mute';
+      video.play().then(() => { setOverlay(null); showBadge(''); }).catch(() => {});
+    });
+    $('vol').addEventListener('input', e => {
+      video.volume = parseFloat(e.target.value);
+      video.muted = video.volume === 0;
+      $('muteBtn').textContent = video.muted ? 'Unmute' : 'Mute';
+    });
+    $('muteBtn').addEventListener('click', () => {
+      video.muted = !video.muted;
+      if (!video.muted) { showBadge(''); if (video.paused) video.play().catch(() => {}); }
+      $('muteBtn').textContent = video.muted ? 'Unmute' : 'Mute';
+    });
+    $('fsBtn').addEventListener('click', toggleFullscreen);
+
+    // Double-tap (or double-click) the video for fullscreen
+    let lastTap = 0;
+    stage.addEventListener('pointerup', e => {
+      if (e.target.closest('button')) return;
+      const now = Date.now();
+      if (now - lastTap < 320) { lastTap = 0; toggleFullscreen(); }
+      else lastTap = now;
+    });
+
+    // Guests cannot pause the stream
+    video.addEventListener('pause', () => {
+      if (!isHost && video.srcObject && video.srcObject.active) video.play().catch(() => {});
+    });
+  }
+
+  /* ---------- chat ---------- */
+  $('chatForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const text = $('chatInput').value.trim();
+    if (!text) return;
+    $('chatInput').value = '';
+    if (isHost) {
+      addMsg(myName, text);
+      broadcast({ type: 'chat', name: myName, text });
+    } else if (peer) {
+      const c = Object.values(peer.connections).flat().find(x => x.type === 'data' && x.open);
+      if (c) c.send({ type: 'chat', name: myName, text });
+    }
+  });
+
+  /* ---------- boot ---------- */
+  $('btnHost').addEventListener('click', startHost);
+  $('btnJoin').addEventListener('click', startGuest);
+  $('roomCode').addEventListener('keydown', e => { if (e.key === 'Enter') startGuest(); });
+
+  const q = new URLSearchParams(location.search).get('room');
+  if (q) { $('roomCode').value = q; }
+})();
+</script>
+</body>
+</html>
