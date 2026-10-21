@@ -157,6 +157,62 @@
   .under .grow { flex: 1; min-width: 180px; color: var(--muted); font-size: .92rem; overflow-wrap: anywhere; }
   .guest-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .guest-controls input[type="range"] { width: 120px; accent-color: var(--accent); }
+  .chk { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: .9rem; }
+  .chk input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .diag { color: var(--muted); font-size: .82rem; opacity: .9; overflow-wrap: anywhere; margin-top: 10px; }
+  .diag b { color: var(--accent); font-weight: 600; }
+  .fixpanel {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px; margin-top: 12px;
+  }
+  .fixpanel h4 { margin: 0 0 4px; font-size: .95rem; }
+  .fixpanel p.note { margin: 0 0 10px; color: var(--muted); font-size: .85rem; }
+  .tracks { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
+  .tracks table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  .tracks th, .tracks td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  .tracks tr:last-child td { border-bottom: 0; }
+  .tracks th { color: var(--muted); font-weight: 600; }
+  .tracks tr.default td { color: var(--accent); }
+  .sel {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 12px; min-height: 44px; font-size: .9rem; color: var(--text);
+  }
+  .warnrow { color: var(--live); font-size: .88rem; margin-bottom: 10px; }
+  /* ---------- join approval ---------- */
+  /* ---------- room list ---------- */
+  .rooms { display: grid; gap: 8px; margin-bottom: 12px; max-height: 250px; overflow-y: auto; }
+  .rooms .empty { color: var(--muted); font-size: .9rem; padding: 16px 4px; text-align: center; }
+  .roomrow {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 12px;
+  }
+  .roomrow .meta { flex: 1; min-width: 0; }
+  .roomrow .nm { font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .roomrow .sub {
+    color: var(--muted); font-size: .82rem; margin-top: 2px;
+    overflow-wrap: anywhere; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .roomrow .btn { min-height: 38px; padding: 8px 14px; }
+  .req {
+    border: 1px solid var(--accent); background: rgba(184, 169, 255, .10);
+    border-radius: 12px; padding: 10px 12px; margin: 4px 0;
+  }
+  .req .who { color: var(--text); font-weight: 600; }
+  .req .sub { color: var(--muted); font-size: .85rem; margin-top: 2px; }
+  .req .under { margin-top: 10px; }
+  .req .btn { min-height: 38px; padding: 8px 14px; }
+  .modal {
+    position: fixed; inset: 0; z-index: 60;
+    background: rgba(10, 8, 18, .82); display: grid; place-items: center; padding: 20px;
+  }
+  .modal-card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+    padding: 22px; max-width: 430px; width: 100%;
+  }
+  .modal-card h3 { margin: 0 0 8px; font-size: 1.15rem; }
+  .modal-card p { margin: 0 0 14px; color: var(--muted); font-size: .95rem; }
+  .modal-card .err { color: var(--live); font-size: .88rem; margin: 0 0 12px; min-height: 1.2em; }
   .filebtn { position: relative; overflow: hidden; display: inline-flex; align-items: center; }
   .filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 100px; }
 
@@ -232,15 +288,31 @@
 
       <section class="choice">
         <h2>Join a room</h2>
-        <p>Enter the room code the host shared with you.</p>
+        <p>Pick whoever is watching right now. No code needed.</p>
         <label class="field"><span>Your name</span><input type="text" id="guestName" maxlength="20" placeholder="Guest" autocomplete="off"></label>
-        <label class="field"><span>Room code</span><input type="text" id="roomCode" maxlength="20" placeholder="e.g. k3x9qa" autocapitalize="off" autocorrect="off" autocomplete="off"></label>
-        <button class="btn block" id="btnJoin">Join room</button>
+        <div class="rooms" id="roomList"></div>
+        <div class="under">
+          <button class="btn" id="btnRefresh">Refresh</button>
+          <span class="grow" id="roomListNote">Looking for rooms...</span>
+        </div>
       </section>
     </div>
     <div class="error" id="landingError" role="alert"></div>
   </div>
 </main>
+
+<!-- ============ JOIN REQUEST (guest side) ============ -->
+<div class="modal" id="joinAsk" hidden>
+  <div class="modal-card">
+    <h3 id="joinAskTitle">The host is playing</h3>
+    <p id="joinAskText">Do you want to join this room?</p>
+    <div class="err" id="joinAskErr"></div>
+    <div class="under">
+      <button class="btn primary" id="joinAskYes">Join the room</button>
+      <button class="btn" id="joinAskNo">Not now</button>
+    </div>
+  </div>
+</div>
 
 <!-- ============ ROOM ============ -->
 <div id="room">
@@ -275,12 +347,35 @@
             </label>
             <button class="btn" id="hostFs">Fullscreen</button>
             <span class="grow" id="fileName">No file selected. Use the player controls to play, pause and seek. Guests follow you.</span>
+            <label class="chk"><input type="checkbox" id="tapAudio" checked> WebAudio audio</label>
+            <label class="chk"><input type="checkbox" id="boost" checked> Boost dialogue</label>
           </div>
           <div class="share" style="margin-top:12px">
             <code id="shareLink"></code>
             <button class="btn" id="copyLink">Copy invite link</button>
           </div>
+          <div class="fixpanel" id="fixPanel" hidden>
+            <h4>Audio tracks</h4>
+            <p class="note" id="fixNote">Checking the file.</p>
+            <div class="warnrow" id="fixWarn" hidden></div>
+            <div class="tracks" id="trackTable" hidden></div>
+            <div class="under" id="remuxRow" hidden>
+              <select class="sel" id="trackSel"></select>
+              <button class="btn primary" id="remuxBtn">Rebuild file with this track</button>
+              <span class="grow" id="remuxInfo"></span>
+            </div>
+            <div class="under" id="dlRow" hidden style="margin-top:10px">
+              <a class="btn" id="dlBtn" download="rebuilt.mp4">Download rebuilt file</a>
+              <span class="grow" id="dlInfo"></span>
+            </div>
+            <div id="cliHint" hidden style="margin-top:10px">
+              <p class="note" style="margin:0 0 4px">The in-browser tool could not run. If ffmpeg is installed on your computer, do this instead:</p>
+              <code id="cliCode" style="display:block;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:.8rem;overflow-wrap:anywhere"></code>
+            </div>
+          </div>
         </div>
+
+        <div class="diag" id="diag"></div>
 
         <!-- Guest tools -->
         <div id="guestTools" hidden>
@@ -290,7 +385,9 @@
               <button class="btn" id="muteBtn">Mute</button>
               <input type="range" id="vol" min="0" max="1" step="0.05" value="1" aria-label="Volume">
               <button class="btn" id="fsBtn">Fullscreen</button>
+              <button class="btn" id="soundFix" hidden>Sound fix</button>
             </div>
+            <span class="diag" id="guestDiag" style="margin-top:0"></span>
           </div>
         </div>
       </div>
@@ -323,6 +420,250 @@
   let myName = 'Guest';
   let guestConn = null;
   let guestWired = false;
+  let myCode = '';
+
+  /* =========================================================
+     LOBBY  (the room list)
+  =========================================================
+     PeerJS has no directory: you cannot ask it which peers exist. So the list
+     works with a tiny elected coordinator - there is no backend anywhere.
+
+     The first host to claim one of the LOBBY_IDS becomes the coordinator and
+     keeps a list of live rooms. Other hosts register with it, guests ask it for
+     the list. If the coordinator vanishes, the next host to start claims the
+     free slot and takes over. If every slot is busy, a host just registers and
+     broadcasts nothing - guests still reach it through the list. */
+  const LOBBY_IDS = ['wparty-lobby-1', 'wparty-lobby-2', 'wparty-lobby-3'];
+  let coordinatorPeer = null;    // set when THIS client is the coordinator
+  let isCoordinator = false;
+  let lobbyClientPeer = null;    // host's peer for talking to a coordinator
+  let lobbyConn = null;          // host -> coordinator connection
+  let hostBeat = null;
+  const directory = new Map();   // code -> room entry (coordinator only)
+  const listPeers = new Set();   // coordinator: connections asking for the list
+
+  function roomSnapshot() {
+    return { code: myCode, name: myName,
+             playing: currentFile ? currentFile.name : '',
+             n: conns.size + 1, ts: Date.now() };
+  }
+
+  function sendRoomsTo(conn) {
+    const rooms = [];
+    directory.forEach(r => rooms.push(r));
+    rooms.sort((a, b) => b.ts - a.ts);
+    try { conn.send({ type: 'rooms', rooms }); } catch (e) {}
+  }
+  function pushRooms() { listPeers.forEach(c => { if (c.open) sendRoomsTo(c); }); }
+
+  // Tell the lobby what our room looks like right now.
+  function publishRoom() {
+    if (!myCode) return;
+    if (isCoordinator) { directory.set(myCode, roomSnapshot()); pushRooms(); return; }
+    if (lobbyConn && lobbyConn.open) {
+      try { lobbyConn.send({ type: 'register', room: roomSnapshot() }); } catch (e) {}
+    }
+  }
+
+  function wireCoordinator(p) {
+    isCoordinator = true;
+    directory.set(myCode, roomSnapshot());
+    p.on('connection', conn => {
+      conn.on('open', () => {
+        const role = (conn.metadata && conn.metadata.role) || 'list';
+        if (role === 'host') {
+          conn.on('data', d => {
+            if (!d) return;
+            if (d.type === 'register' && d.room && d.room.code) {
+              // one code belongs to one connection - a host may not steal another's
+              if (conn._roomCode && conn._roomCode !== d.room.code) directory.delete(conn._roomCode);
+              conn._roomCode = d.room.code;
+              directory.set(d.room.code, d.room);
+              pushRooms();
+            } else if (d.type === 'unregister') {
+              directory.delete(d.code); conn._roomCode = null; pushRooms();
+            }
+          });
+          conn.on('close', () => {
+            if (conn._roomCode) { directory.delete(conn._roomCode); pushRooms(); }
+          });
+        } else {
+          listPeers.add(conn);
+          conn.on('data', d => { if (d && d.type === 'list') sendRoomsTo(conn); });
+          conn.on('close', () => listPeers.delete(conn));
+          sendRoomsTo(conn);
+        }
+      });
+    });
+    // forget rooms that stopped talking
+    setInterval(() => {
+      const cut = Date.now() - 30000;
+      let changed = false;
+      directory.forEach((r, k) => { if (r.ts < cut) { directory.delete(k); changed = true; } });
+      if (changed) pushRooms();
+    }, 15000);
+  }
+
+  function tryBecomeCoordinator(id) {
+    return new Promise(async resolve => {
+      const opts = await getPeerOpts();
+      let done = false;
+      const p = new Peer(id, opts);
+      const finish = ok => {
+        if (done) return; done = true; clearTimeout(t);
+        if (!ok) { try { p.destroy(); } catch (e) {} } else { coordinatorPeer = p; wireCoordinator(p); }
+        resolve(ok);
+      };
+      const t = setTimeout(() => finish(false), 6000);
+      p.on('open', () => finish(true));
+      p.on('error', err => {
+        // 'unavailable-id' means someone else holds the slot; anything else and
+        // this browser cannot reach the signalling server at all
+        finish(false);
+      });
+    });
+  }
+
+  window.addEventListener('beforeunload', () => {
+    if (isCoordinator) return;
+    if (lobbyConn && lobbyConn.open && myCode) {
+      try { lobbyConn.send({ type: 'unregister', code: myCode }); } catch (e) {}
+    }
+  });
+
+  function wireHostLobby(conn) {
+    lobbyConn = conn;
+    conn.on('open', () => { publishRoom(); });
+    conn.on('error', () => {});
+    conn.on('close', () => {
+      lobbyConn = null;
+      // the coordinator went away - one of us has to take over
+      setTimeout(() => { if (!isCoordinator) joinLobby(); }, 1500);
+    });
+    if (hostBeat) clearInterval(hostBeat);
+    hostBeat = setInterval(publishRoom, 10000);
+  }
+
+  let lobbyBusy = false;
+  async function joinLobby() {
+    if (isCoordinator || lobbyBusy) return;
+    lobbyBusy = true;
+    try { await joinLobbyInner(); } finally { lobbyBusy = false; }
+  }
+  async function joinLobbyInner() {
+    for (const id of LOBBY_IDS) {
+      if (await tryBecomeCoordinator(id)) return;   // we are the coordinator now
+    }
+    // every slot is taken: register with one of them
+    if (!lobbyClientPeer || lobbyClientPeer.destroyed) {
+      const opts = await getPeerOpts();
+      lobbyClientPeer = new Peer(opts);
+    }
+    const p = lobbyClientPeer;
+    const attempt = id => new Promise(resolve => {
+      let done = false;
+      const c = p.connect(id, { metadata: { role: 'host' }, reliable: true });
+      const finish = ok => { if (done) return; done = true; clearTimeout(t); resolve(ok); };
+      const t = setTimeout(() => { try { c.close(); } catch (e) {} finish(false); }, 5000);
+      c.on('open', () => { wireHostLobby(c); finish(true); });
+      c.on('error', () => finish(false));
+    });
+    for (const id of LOBBY_IDS) { if (await attempt(id)) return; }
+    // no coordinator at all: run the list ourselves so guests are never stuck
+    for (const id of LOBBY_IDS) { if (await tryBecomeCoordinator(id)) return; }
+    addMsg('', 'The room list is unavailable. Guests can still join through the invite link.', true);
+  }
+
+  /* ---------- guest: browse the list ---------- */
+  function renderRooms(rooms) {
+    const box = $('roomList'), note = $('roomListNote');
+    box.innerHTML = '';
+    const live = (rooms || []).filter(r => r && r.code);
+    if (!live.length) {
+      const d = document.createElement('div');
+      d.className = 'empty';
+      d.textContent = 'No one is hosting right now.';
+      box.appendChild(d);
+      note.textContent = 'Start a room and it shows up here for everyone.';
+      return;
+    }
+    note.textContent = live.length + (live.length === 1 ? ' room is live.' : ' rooms are live.');
+    if (joinBusy) setJoinBusy(true);
+    live.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'roomrow';
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const nm = document.createElement('div');
+      nm.className = 'nm';
+      const dot = document.createElement('span');
+      dot.className = 'dot live';
+      const nameTxt = document.createElement('span');
+      nameTxt.textContent = String(r.name || 'A host').slice(0, 20);
+      nm.appendChild(dot); nm.appendChild(nameTxt);
+      const sub = document.createElement('div');
+      sub.className = 'sub';
+      sub.textContent = r.playing
+        ? 'Watching "' + r.playing + '" - ' + (r.n || 1) + ' watching'
+        : 'Waiting to pick a movie - ' + (r.n || 1) + ' in the room';
+      meta.appendChild(nm); meta.appendChild(sub);
+      const b = document.createElement('button');
+      b.className = 'btn primary';
+      b.textContent = 'Join';
+      b.addEventListener('click', () => startGuest(r.code, r.name));
+      row.appendChild(meta); row.appendChild(b);
+      box.appendChild(row);
+    });
+  }
+
+  let listBusy = false;
+  async function loadRoomList() {
+    if (listBusy) return;
+    listBusy = true;
+    renderRooms([]);
+    $('roomListNote').textContent = 'Looking for rooms...';
+    const opts = await getPeerOpts();
+    if (!lobbyClientPeer || lobbyClientPeer.destroyed) lobbyClientPeer = new Peer(opts);
+    const p = lobbyClientPeer;
+    let got = false;
+    let probes = [];
+    const cleanup = () => { probes.forEach(c => { try { c.close(); } catch (e) {} }); probes = []; listBusy = false; };
+    const deadline = setTimeout(() => {
+      if (!got) { cleanup(); $('roomListNote').textContent = 'No answer from the room list. Tap Refresh in a moment.'; }
+    }, 12000);
+    const ask = i => {
+      if (i >= LOBBY_IDS.length || got) return;
+      const c = p.connect(LOBBY_IDS[i], { metadata: { role: 'list' }, reliable: true });
+      probes.push(c);
+      const t = setTimeout(() => { try { c.close(); } catch (e) {} ask(i + 1); }, 5000);
+      c.on('open', () => { try { c.send({ type: 'list' }); } catch (e) {} });
+      c.on('data', d => {
+        if (d && d.type === 'rooms') {
+          got = true; clearTimeout(deadline); clearTimeout(t);
+          renderRooms(d.rooms);
+          // close the probe so the coordinator does not collect sockets
+          setTimeout(cleanup, 300);
+        }
+      });
+      c.on('error', () => { clearTimeout(t); if (!got) ask(i + 1); });
+    };
+    if (p.open) ask(0);
+    else { p.once('open', () => ask(0));
+           setTimeout(() => { if (!p.open && !got) { cleanup(); $('roomListNote').textContent = 'Could not reach the room list.'; } }, 9000); }
+    // wire the error handler only once - loadRoomList runs on a timer
+    if (!p._lobbyWired) {
+      p._lobbyWired = true;
+      p.on('error', err => {
+        if (err.type === 'unavailable-id') return;
+        if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
+          try { p.destroy(); } catch (e) {}
+          if (lobbyClientPeer === p) lobbyClientPeer = null;
+        }
+        listBusy = false;
+        $('roomListNote').textContent = 'Could not reach the room list.';
+      });
+    }
+  }
 
   // ======================= TURN SETTINGS =======================
   // "Connection to the host failed" means the two devices could not reach each
@@ -439,6 +780,7 @@
       keepAwake();
       if (peer && peer.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} }
       if (fb && fb.ac.state === 'suspended') fb.ac.resume().catch(() => {});
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
       if (!isHost && video.srcObject && video.paused) video.play().catch(() => {});
     }
   });
@@ -446,8 +788,9 @@
   /* =========================================================
      HOST
   ========================================================= */
-  const conns = new Map();   // peerId -> data connection
+  const conns = new Map();   // peerId -> data connection (approved guests)
   const calls = new Map();   // peerId -> media call
+  const pending = new Map(); // peerId -> guest that is waiting for an answer
   let hostStream = null;
 
   function broadcast(obj) { conns.forEach(c => { if (c.open) c.send(obj); }); }
@@ -455,6 +798,7 @@
     const n = conns.size + 1;
     countPill.textContent = n + ' watching';
     broadcast({ type: 'count', n });
+    publishRoom();
   }
   function sendStateTo(conn) {
     if (conn.open) conn.send({ type: 'state', playing: !video.paused && !video.ended });
@@ -466,6 +810,74 @@
     calls.set(id, call);
     call.on('close', () => { if (calls.get(id) === call) calls.delete(id); });
   }
+  /* ---------- join approval ---------- */
+  function removePending(peerId) {
+    const p = pending.get(peerId);
+    if (!p) return null;
+    pending.delete(peerId);
+    if (p.timer) clearTimeout(p.timer);
+    if (p.el) p.el.remove();
+    return p;
+  }
+
+  function showJoinRequest(peerId, who) {
+    const p = pending.get(peerId);
+    if (!p || p.el) return;
+    const d = document.createElement('div');
+    d.className = 'req';
+    const w = document.createElement('div');
+    w.className = 'who';
+    w.textContent = who + ' wants to join';
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = 'Waiting for your answer.';
+    const row = document.createElement('div');
+    row.className = 'under';
+    const yes = document.createElement('button');
+    yes.className = 'btn primary';
+    yes.textContent = 'Yes';
+    yes.addEventListener('click', () => approveJoin(peerId));
+    const no = document.createElement('button');
+    no.className = 'btn';
+    no.textContent = 'No';
+    no.addEventListener('click', () => denyJoin(peerId));
+    row.appendChild(yes); row.appendChild(no);
+    d.appendChild(w); d.appendChild(sub); d.appendChild(row);
+    msgs.appendChild(d);
+    msgs.scrollTop = msgs.scrollHeight;
+    p.el = d;
+    // do not let a request hang around forever
+    p.timer = setTimeout(() => denyJoin(peerId, true), 90000);
+  }
+
+  function approveJoin(peerId) {
+    const p = removePending(peerId);
+    if (!p) return;
+    const conn = p.conn;
+    if (!conn || !conn.open) {
+      addMsg('', p.name + ' left before the request could be accepted.', true);
+      return;
+    }
+    conns.set(peerId, conn);
+    try { conn.send({ type: 'join-approve', host: myName }); } catch (e) {}
+    sendStateTo(conn);
+    updateCount();
+    addMsg('', p.name + ' joined the room.', true);
+    broadcast({ type: 'sys', text: p.name + ' joined the room.' });
+    if (hostStream) callGuest(peerId);
+  }
+
+  function denyJoin(peerId, expired) {
+    const p = removePending(peerId);
+    if (!p) return;
+    try {
+      p.conn.send({ type: 'join-deny',
+                    reason: expired ? 'The request timed out.' : 'The host did not accept the request.' });
+    } catch (e) {}
+    setTimeout(() => { try { p.conn.close(); } catch (e) {} }, 300);
+    addMsg('', expired ? (p.name + ' did not answer in time.') : (p.name + ' was declined.'), true);
+  }
+
   function canCaptureNative() {
     const p = HTMLMediaElement.prototype;
     return ('captureStream' in p) || ('mozCaptureStream' in p);
@@ -479,18 +891,74 @@
   // iPhone Safari has no video.captureStream(). Instead we draw the video onto a
   // canvas (canvas.captureStream works on iOS) and take the sound through WebAudio.
   let fb = null;
+
+  /* ---------- WebAudio tap ------------------------------------------------
+     One source of truth for the audio we send to guests.
+
+     Two reasons we do not trust element.captureStream() for the audio:
+       1. the audio track Chrome puts in there is regularly silent or noisy,
+       2. once a media element is routed into WebAudio the element's own
+          captureStream() no longer carries the sound at all.
+     Tapping the element through WebAudio gives us the real PCM samples and
+     lets us lift the dialogue, which in many files sits far below the
+     background noise. The AudioContext is created inside the "Create room"
+     tap so Chrome allows it to run. */
+  let audioCtx = null, mediaSource = null, tapDest = null, hostMeter = null;
+  let tapGain = null, tapComp = null;
+  let useTapAudio = true, useBoost = true;
+
+  function ensureAudioCtx() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try { audioCtx = new AC(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    return audioCtx;
+  }
+
+  function ensureAudioTap() {
+    const ac = ensureAudioCtx();
+    if (!ac) return null;
+    if (tapDest) return tapDest;
+    try {
+      mediaSource = ac.createMediaElementSource(video);   // once per element only
+      tapGain = ac.createGain();
+      tapComp = ac.createDynamicsCompressor();
+      tapComp.threshold.value = -34; tapComp.ratio.value = 5;
+      tapComp.knee.value = 8; tapComp.attack.value = 0.006; tapComp.release.value = 0.25;
+      tapDest = ac.createMediaStreamDestination();
+      mediaSource.connect(tapGain);
+      tapGain.connect(tapComp);
+      tapComp.connect(tapDest);       // -> the track the guests receive
+      tapComp.connect(ac.destination); // the host still hears the movie
+      hostMeter = ac.createAnalyser();
+      hostMeter.fftSize = 1024;
+      tapGain.connect(hostMeter);
+    } catch (e) {
+      console.warn('WebAudio tap failed', e);
+      mediaSource = null; tapDest = null; hostMeter = null;
+      return null;
+    }
+    return tapDest;
+  }
+
+  function applyBoost() {
+    if (!tapGain || !tapComp) return;
+    tapGain.gain.value = useBoost ? 1.6 : 1.0;
+    tapComp.threshold.value = useBoost ? -34 : -10;
+    tapComp.ratio.value = useBoost ? 5 : 1;
+  }
+
   function prepareFallback() {
     if (fb) { if (fb.ac.state === 'suspended') fb.ac.resume().catch(() => {}); return fb; }
-    const AC = window.AudioContext || window.webkitAudioContext;
     const cv = document.createElement('canvas');
     cv.width = 640; cv.height = 360;
     const g = cv.getContext('2d');
-    const ac = new AC();
-    const src = ac.createMediaElementSource(video);   // can only be done once per element
-    const dest = ac.createMediaStreamDestination();
-    src.connect(dest);
-    src.connect(ac.destination);                      // host still hears the movie
-    fb = { cv, g, ac, dest };
+    const tap = ensureAudioTap();
+    if (!tap) return null;
+    const ac = audioCtx;
+    fb = { cv, g, ac, dest: tap };
     const MAXW = 960;                                 // keep it light for phone uplinks
     const draw = () => {
       if (video.videoWidth && !video.paused && !video.ended && video.readyState >= 2) {
@@ -506,10 +974,25 @@
     return fb;
   }
   function captureHostStream() {
-    if (video.captureStream) return video.captureStream();
-    if (video.mozCaptureStream) return video.mozCaptureStream();
+    const vid = video.captureStream ? video.captureStream()
+              : (video.mozCaptureStream ? video.mozCaptureStream() : null);
+    if (vid) {
+      // Prefer the WebAudio tap for the audio: the audio track Chrome puts into
+      // element.captureStream() is regularly silent or noisy, and that is what
+      // makes the guests hear background noise but no dialogue.
+      if (useTapAudio) {
+        const tap = ensureAudioTap();
+        if (tap && vid.getVideoTracks().length) {
+          const s = new MediaStream(vid.getVideoTracks());
+          tap.stream.getAudioTracks().forEach(t => s.addTrack(t));
+          return s;
+        }
+      }
+      return vid;
+    }
     if (!canCaptureCanvas()) return null;
     const f = prepareFallback();
+    if (!f) return null;
     const stream = f.cv.captureStream(30);
     f.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
     return stream;
@@ -518,18 +1001,21 @@
   async function startHost() {
     isHost = true;
     myName = ($('hostName').value.trim() || 'Host');
-    const code = randomCode();
+    // Unlock the AudioContext while we are still inside the user's tap - Chrome
+    // only lets an AudioContext start inside a tap.
+    ensureAudioCtx();
+    myCode = randomCode();
     const opts = await getPeerOpts();
-    peer = new Peer(PREFIX + code, opts);
+    peer = new Peer(PREFIX + myCode, opts);
     let opened = false;
 
     peer.on('open', () => {
-      if (opened) { setStatus('Room ' + code, 'live'); return; }   // fired again after a reconnect
+      if (opened) { setStatus('Live', 'live'); return; }   // fired again after a reconnect
       opened = true;
       enterRoom();
       $('hostTools').hidden = false;
       video.controls = true;
-      const link = location.href.split('#')[0].split('?')[0] + '?room=' + code;
+      const link = location.href.split('#')[0].split('?')[0] + '?room=' + myCode;
       $('shareLink').textContent = link;
       if (!/^https?:$/.test(location.protocol)) {
         addMsg('', 'This page is opened from a file. Upload it to a website (https) so the invite link works for guests.', true);
@@ -552,8 +1038,9 @@
         if (!done) window.prompt('Copy this link', link);
         setTimeout(() => $('copyLink').textContent = label, 1800);
       };
-      setStatus('Room ' + code, 'live');
-      addMsg('', 'Room created. Share the invite link to bring people in.', true);
+      setStatus('Live', 'live');
+      addMsg('', 'Room created. It is in the room list now - anyone can pick it. The invite link below is just a shortcut.', true);
+      joinLobby();
 
       if (!canCapture()) {
         // e.g. iPhone Safari cannot capture a playing video to stream it
@@ -585,24 +1072,41 @@
     });
 
     peer.on('connection', conn => {
+      // A guest connects, but is NOT in the room yet. The host has to answer
+      // the request first, so nothing is counted and nothing is streamed.
       conn.on('open', () => {
-        conns.set(conn.peer, conn);
         const who = (conn.metadata && conn.metadata.name) || 'A guest';
-        conn.send({ type: 'hello', host: myName });
-        sendStateTo(conn);
-        updateCount();
-        addMsg('', who + ' joined.', true);
-        broadcast({ type: 'sys', text: who + ' joined.' });
-        if (hostStream) callGuest(conn.peer);
+        pending.set(conn.peer, { conn, name: who, el: null, timer: null });
+        try {
+          conn.send({ type: 'room-info', host: myName,
+                      playing: currentFile ? currentFile.name : '' });
+        } catch (e) {}
+        // the request itself arrives later, when the guest confirms
       });
       conn.on('data', d => {
-        if (d && d.type === 'chat' && typeof d.text === 'string') {
+        if (!d) return;
+        if (d.type === 'chat' && typeof d.text === 'string') {
+          // only people who were let in may talk to the room
+          if (!conns.has(conn.peer)) return;
           const msg = { type: 'chat', name: String(d.name || 'Guest').slice(0, 20), text: d.text.slice(0, 300) };
           addMsg(msg.name, msg.text);
           broadcast(msg);
+        } else if (d.type === 'join-request') {
+          const who = String(d.name || (conn.metadata && conn.metadata.name) || 'A guest').slice(0, 20);
+          const p = pending.get(conn.peer);
+          if (p) p.name = who;
+          showJoinRequest(conn.peer, who);
+        } else if (d.type === 'join-cancel') {
+          const p = removePending(conn.peer);
+          if (p) addMsg('', p.name + ' cancelled the request.', true);
         }
       });
       conn.on('close', () => {
+        const p = pending.get(conn.peer);
+        if (p) {
+          removePending(conn.peer);
+          addMsg('', p.name + ' left before joining.', true);
+        }
         conns.delete(conn.peer);
         if (calls.has(conn.peer)) { try { calls.get(conn.peer).close(); } catch (e) {} calls.delete(conn.peer); }
         updateCount();
@@ -610,6 +1114,11 @@
     });
 
     $('hostFs').addEventListener('click', toggleFullscreen);
+    const tapChk = $('tapAudio');
+    if (tapChk) tapChk.addEventListener('change', e => { useTapAudio = e.target.checked; });
+    $('remuxBtn').addEventListener('click', () => rebuildFile($('trackSel').value || '0'));
+    const boostChk = $('boost');
+    if (boostChk) boostChk.addEventListener('change', e => { useBoost = e.target.checked; applyBoost(); });
 
     // File chosen
     $('fileInput').addEventListener('change', e => {
@@ -620,10 +1129,16 @@
       calls.clear();
       hostStream = null;
       video.src = URL.createObjectURL(f);
+      if (useTapAudio) { try { ensureAudioTap(); applyBoost(); } catch (err) {} }
       if (!canCaptureNative() && canCaptureCanvas()) { try { prepareFallback(); } catch (err) {} }
       $('fileName').textContent = f.name;
       setOverlay(null);
       video.load();
+      currentFile = f;
+      rebuiltBlob = null;
+      $('dlRow').hidden = true;
+      inspectCurrentFile();
+      publishRoom();
       broadcast({ type: 'sys', text: 'Host loaded "' + f.name + '".' });
       addMsg('', 'Loaded "' + f.name + '". Press play when everyone is ready.', true);
     });
@@ -632,6 +1147,7 @@
     video.addEventListener('playing', () => {
       keepAwake();
       if (fb && fb.ac.state === 'suspended') fb.ac.resume().catch(() => {});
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
       if (!hostStream || hostStream.getTracks().length === 0) {
         hostStream = captureHostStream();
         if (!hostStream) return;
@@ -646,6 +1162,461 @@
   /* =========================================================
      GUEST
   ========================================================= */
+  /* =========================================================
+     AUDIO TRACK INSPECTION + REBUILD
+  =========================================================
+     Chrome can only play ONE audio track of a file: the default one. If a file
+     carries the dialogue on a second track, the browser never hears it and you
+     get the background/music track only. There is no audioTracks API in Chrome
+     to switch, so the fix is to rebuild the file with the wanted track.
+
+     "Inspect" parses the container in pure JS (no download, instant). "Rebuild"
+     runs ffmpeg.wasm to write a new mp4 that carries the chosen track only. */
+
+  let currentFile = null;
+  let rebuiltBlob = null;
+  let audioTracks = [];
+
+  /* ---------- pure JS MP4/MOV box parser ---------- */
+  function parseContainerTracks(buf) {
+    let dv;
+    try { dv = new DataView(buf); } catch (e) { return null; }
+    const FOURCC = o => String.fromCharCode(dv.getUint8(o), dv.getUint8(o+1), dv.getUint8(o+2), dv.getUint8(o+3));
+    const dec = (o, n) => { try { return new TextDecoder('utf-8').decode(new Uint8Array(buf, o, n)).trim(); } catch (e) { return ''; } };
+    const printable = str => str && str.length > 0 && !/[\u0000-\u001f]/.test(str);
+    // The 'name' box is a full box in the QuickTime spec but ffmpeg writes the
+    // string straight into it. Try both offsets and keep the sane one.
+    function decLoose(o, n) {
+      const a = dec(o, n), b = dec(o + 4, Math.max(0, n - 4));
+      if (printable(a) && !printable(b)) return a;
+      if (printable(b) && !printable(a)) return b;
+      if (printable(a) && printable(b)) return a.length >= b.length ? a : b;
+      return printable(a) ? a : '';
+    }
+
+    function boxes(off, end) {
+      const res = [];
+      let o = off;
+      while (o + 8 <= end) {
+        let size = dv.getUint32(o);
+        const t = FOURCC(o + 4);
+        let hdr = 8;
+        if (size === 1) { try { size = Number(dv.getBigUint64(o + 8)); } catch (e) { break; } hdr = 16; }
+        else if (size === 0) { size = end - o; }
+        if (size < hdr || o + size > end) break;
+        res.push({ type: t, body: o + hdr, bend: o + size });
+        o += size;
+      }
+      return res;
+    }
+    const find = (off, end, type) => boxes(off, end).find(b => b.type === type);
+
+    // ISO 14496-12 packs a 3 letter code as 3 x 5 bit, each offset by 0x60.
+    function unpackLang(pack) {
+      const c = i => String.fromCharCode(((pack >> (10 - 5 * i)) & 0x1f) + 0x60);
+      const v = c(0) + c(1) + c(2);
+      return /^[A-Za-z]{3}$/.test(v) ? v.toLowerCase() : '';
+    }
+
+    function trackTitle(off, end) {
+      const udta = find(off, end, 'udta');
+      if (!udta) return '';
+      const meta = find(udta.body, udta.bend, 'meta');
+      if (meta) {
+        // 'meta' is a FullBox in ISO but a plain container in QuickTime.
+        let kids = [];
+        if (meta.body + 8 <= meta.bend) {
+          const sz = dv.getUint32(meta.body), t = FOURCC(meta.body + 4);
+          if (sz >= 8 && sz <= meta.bend - meta.body && (t === 'hdlr' || t === 'ilst')) kids = boxes(meta.body, meta.bend);
+          else kids = boxes(meta.body + 4, meta.bend);
+        } else kids = boxes(meta.body + 4, meta.bend);
+        const ilst = kids.find(b => b.type === 'ilst');
+        if (ilst) {
+          const nam = boxes(ilst.body, ilst.bend).find(b => b.type === '\u00a9nam');
+          if (nam) {
+            const d = find(nam.body, nam.bend, 'data');
+            if (d && d.bend - d.body > 8) {
+              const t = dec(d.body + 8, d.bend - d.body - 8);
+              if (printable(t)) return t;
+            }
+          }
+        }
+      }
+      const nm = find(udta.body, udta.bend, 'name');
+      if (nm && nm.bend - nm.body > 4) {
+        const t = decLoose(nm.body, nm.bend - nm.body);
+        if (t) return t;
+      }
+      return '';
+    }
+
+    const moov = find(0, buf.byteLength, 'moov');
+    if (!moov) return null;
+    const out = [];
+    for (const trak of boxes(moov.body, moov.bend).filter(b => b.type === 'trak')) {
+      let enabled = false, inMovie = false, id = 0;
+      const tkhd = find(trak.body, trak.bend, 'tkhd');
+      if (tkhd) {
+        const ver = dv.getUint8(tkhd.body);
+        const flags = (dv.getUint8(tkhd.body + 1) << 16) | (dv.getUint8(tkhd.body + 2) << 8) | dv.getUint8(tkhd.body + 3);
+        // 0x1 = track_enabled. This is the bit Chromium looks at when it picks
+        // which audio track to play - NOT 0x2 (track_in_movie).
+        enabled = !!(flags & 0x1);
+        inMovie = !!(flags & 0x2);
+        id = dv.getUint32(tkhd.body + (ver === 1 ? 20 : 12));
+      }
+      let handler = '', rate = 0, channels = 0, codec = '', lang = '';
+      const mdia = find(trak.body, trak.bend, 'mdia');
+      if (mdia) {
+        const hdlr = find(mdia.body, mdia.bend, 'hdlr');
+        if (hdlr) handler = FOURCC(hdlr.body + 8);
+        const mdhd = find(mdia.body, mdia.bend, 'mdhd');
+        if (mdhd) {
+          const ver = dv.getUint8(mdhd.body);
+          lang = unpackLang(dv.getUint16(mdhd.body + (ver === 1 ? 32 : 20)));
+        }
+        const minf = find(mdia.body, mdia.bend, 'minf');
+        if (minf) {
+          const stbl = find(minf.body, minf.bend, 'stbl');
+          if (stbl) {
+            const stsd = find(stbl.body, stbl.bend, 'stsd');
+            if (stsd) {
+              const entry = stsd.body + 8;
+              if (entry + 40 <= stsd.bend) {
+                codec = FOURCC(entry + 4);
+                channels = dv.getUint16(entry + 24);
+                rate = dv.getUint32(entry + 32) >>> 16;
+              }
+            }
+          }
+        }
+      }
+      out.push({ id, enabled, inMovie, handler, rate, channels, codec, lang,
+                 title: trackTitle(trak.body, trak.bend) });
+    }
+    // Chrome plays the first ENABLED audio track. If the file marks none of
+    // them enabled, it falls back to the first audio track in the file.
+    const soun = out.filter(t => t.handler === 'soun');
+    if (soun.length && !soun.some(t => t.enabled)) soun[0].enabled = true;
+    return out;
+  }
+
+  function renderTracks(list, note, warn) {
+    audioTracks = list;
+    const tbl = $('trackTable'), sel = $('trackSel'), row = $('remuxRow');
+    $('fixNote').textContent = note;
+    const w = $('fixWarn');
+    if (warn) { w.hidden = false; w.textContent = warn; } else w.hidden = true;
+    if (!list.length) { tbl.hidden = true; row.hidden = true; return; }
+    let html = '<table><thead><tr><th>#</th><th>Kind</th><th>Codec</th><th>Channels</th><th>Language</th><th>Title</th><th>Status</th></tr></thead><tbody>';
+    list.forEach((t, i) => {
+      html += '<tr class="' + (t.enabled ? 'default' : '') + '"><td>' + (i + 1) + '</td><td>' +
+        (t.handler === 'soun' ? 'Audio' : t.handler === 'vide' ? 'Video' : (t.handler || '?')) + '</td><td>' +
+        (t.codec || '-') + '</td><td>' + (t.channels || '-') + '</td><td>' +
+        (t.lang || '-') + '</td><td>' +
+        (t.title ? t.title.replace(/</g, '&lt;') : '-') + '</td><td>' +
+        (t.enabled ? 'Chrome plays this one' : 'not the default') + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    tbl.innerHTML = html;
+    tbl.hidden = false;
+    sel.innerHTML = '';
+    // NOTE: the option value is the ORDINAL among the audio tracks, because
+    // ffmpeg's "0:a:N" counts audio streams only - not the whole stream list.
+    let ordinal = 0;
+    list.forEach((t) => {
+      if (t.handler !== 'soun') return;
+      const o = document.createElement('option');
+      o.value = String(ordinal);
+      o.textContent = 'Audio track ' + (ordinal + 1) + ' - ' + (t.codec || '?') + ' ' + (t.channels || '?') + 'ch' +
+        (t.lang ? ' [' + t.lang + ']' : '') + (t.title ? ' - ' + t.title : '') + (t.enabled ? '  <- what Chrome plays' : '');
+      sel.appendChild(o);
+      ordinal++;
+    });
+    const defOrd = list.filter(t => t.handler === 'soun').findIndex(t => t.enabled);
+    if (defOrd >= 0) sel.value = String(defOrd);
+    row.hidden = false;
+  }
+
+  async function inspectCurrentFile() {
+    const panel = $('fixPanel');
+    if (!currentFile) { panel.hidden = true; return; }
+    panel.hidden = false;
+    $('remuxRow').hidden = true;
+    $('trackTable').hidden = true;
+    $('fixWarn').hidden = true;
+    $('fixNote').textContent = 'Reading ' + currentFile.name + '...';
+    const buf = await currentFile.arrayBuffer();
+    const parsed = parseContainerTracks(buf);
+    if (!parsed) {
+      renderTracks([], 'This is not an MP4/MOV container, so the track list could not be read in the browser. Use the rebuild button - ffmpeg will find the tracks.', '');
+      $('remuxRow').hidden = false;
+      $('trackSel').innerHTML = '<option value="0">Let ffmpeg pick the first audio track</option>';
+      return;
+    }
+    const audio = parsed.filter(t => t.handler === 'soun');
+    const video = parsed.filter(t => t.handler === 'vide');
+    if (!audio.length) {
+      renderTracks(parsed, 'The file carries ' + video.length + ' video track(s) and no audio track at all.', 'No audio track found - the file itself is the problem here.');
+      return;
+    }
+    const def = audio.find(t => t.enabled);
+    const defIdx = audio.indexOf(def);
+    if (audio.length === 1) {
+      renderTracks(parsed, 'The file has ' + video.length + ' video and 1 audio track (' + (audio[0].codec || '?') + ', ' + (audio[0].lang || 'no language tag') + ').', '');
+      return;
+    }
+    renderTracks(parsed,
+      'The file has ' + video.length + ' video and ' + audio.length + ' audio tracks. Chrome plays only track ' + (defIdx + 1) +
+      (def && def.lang ? ' (' + def.lang + ')' : '') + ', the rest stay silent.',
+      'That is why the dialogue is missing. Pick the track that carries the dialogue below and rebuild the file.');
+    showCliHint();
+    // preselect the first NON default audio track - that is the dialogue in most files
+    const other = audio.findIndex(t => !t.enabled);
+    if (other >= 0) $('trackSel').value = String(other);
+  }
+
+  /* ---------- ffmpeg.wasm rebuild ---------- */
+  let ffmpegFF = null;
+  async function getFFmpeg(onLog) {
+    if (ffmpegFF) return ffmpegFF;
+    if (typeof FFmpegWASM === 'undefined') {
+      await loadScript('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js');
+    }
+    const FF = (typeof FFmpegWASM !== 'undefined' && FFmpegWASM.FFmpeg) || window.FFmpeg;
+    const ff = new FF();
+    if (onLog) ff.on('log', ({ message }) => onLog(message));
+    await ff.load({
+      coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+      wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
+    });
+    ffmpegFF = ff;
+    return ff;
+  }
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = src; sc.onload = res; sc.onerror = () => rej(new Error('Could not load ' + src));
+      document.head.appendChild(sc);
+    });
+  }
+
+  async function rebuildFile(trackSel) {
+    if (!currentFile) return;
+    const info = $('remuxInfo');
+    info.textContent = 'Loading the video tool (about 30 MB, once)...';
+    $('remuxBtn').disabled = true;
+    try {
+      const ff = await getFFmpeg(m => {
+        if (/Output #|Stream #|Press \[q\]/.test(m)) info.textContent = m.trim().slice(0, 120);
+      });
+      const ext = (currentFile.name.split('.').pop() || 'mkv').toLowerCase();
+      const inName = 'in.' + (ext.length <= 4 ? ext : 'mp4');
+      info.textContent = 'Reading the file...';
+      await ff.writeFile(inName, new Uint8Array(await currentFile.arrayBuffer()));
+      const mapArgs = n => ['-i', inName, '-map', '0:v:0', '-map', '0:a:' + n,
+                            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+                            '-movflags', '+faststart', 'out.mp4'];
+      info.textContent = 'Rebuilding...';
+      let code = await ff.exec(mapArgs(trackSel));
+      if (code !== 0) {
+        // maybe the codec cannot be copied straight over - re-encode the video
+        info.textContent = 'Copy failed, re-encoding the video...';
+        code = await ff.exec(['-i', inName, '-map', '0:v:0', '-map', '0:a:' + trackSel,
+                               '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24',
+                               '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', 'out.mp4']);
+      }
+      if (code !== 0) {
+        // last resort: the first audio track of the file
+        info.textContent = 'That track could not be read, using the first audio track...';
+        code = await ff.exec(mapArgs(0));
+      }
+      if (code !== 0) throw new Error('ffmpeg exited with code ' + code);
+      const data = await ff.readFile('out.mp4');
+      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+      rebuiltBlob = new Blob([bytes], { type: 'video/mp4' });
+      await ff.deleteFile(inName); await ff.deleteFile('out.mp4');
+      // swap the playing source
+      const old = video.src;
+      video.src = URL.createObjectURL(rebuiltBlob);
+      if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
+      video.load();
+      // the stream we send to the guests belongs to the old file
+      calls.forEach(c => { try { c.close(); } catch (e) {} });
+      calls.clear(); hostStream = null;
+      $('fileName').textContent = currentFile.name + ' (rebuilt)';
+      info.textContent = 'Done. The file now carries the track you picked.';
+      $('dlRow').hidden = false;
+      const a = $('dlBtn');
+      a.href = URL.createObjectURL(rebuiltBlob);
+      a.download = (currentFile.name.replace(/\.[^.]+$/, '') || 'video') + '-rebuilt.mp4';
+      $('dlInfo').textContent = 'Keep this copy, it plays the dialogue everywhere.';
+      try { video.play().catch(() => {}); } catch (e) {}
+    } catch (err) {
+      info.textContent = 'Rebuild failed: ' + (err && err.message ? err.message : err);
+      showCliHint();
+    }
+    $('remuxBtn').disabled = false;
+  }
+
+  function showCliHint() {
+    const hint = $('cliHint'), code = $('cliCode');
+    if (!hint || !code) return;
+    const ordinal = $('trackSel') ? $('trackSel').value : '0';
+    const name = currentFile ? currentFile.name : 'movie.mkv';
+    code.textContent = 'ffmpeg -i "' + name + '" -map 0:v:0 -map 0:a:' + ordinal +
+      ' -c:v copy -c:a aac -b:a 192k -movflags +faststart "' +
+      name.replace(/\.[^.]+$/, '') + '-dialogue.mp4"';
+    hint.hidden = false;
+  }
+
+  /* ---------- the "do you want to join" dialog ---------- */
+  let askMode = 'ask';   // ask | waiting | declined
+  let joinAskHost = '';
+
+  function showJoinAsk(playing) {
+    askMode = 'ask';
+    $('joinAskTitle').textContent = joinAskHost
+      ? (joinAskHost + ' is playing something')
+      : 'The host is playing';
+    $('joinAskText').textContent = playing
+      ? 'The host is playing "' + playing + '". Do you want to join this room?'
+      : 'The host is watching something right now. Do you want to join this room?';
+    $('joinAskErr').textContent = '';
+    $('joinAskYes').hidden = false;
+    $('joinAskNo').hidden = false;
+    $('joinAskNo').textContent = 'Not now';
+    $('joinAsk').hidden = false;
+  }
+  function setJoinAskPlaying(playing) {
+    if ($('joinAsk').hidden || !playing) return;
+    $('joinAskText').textContent = 'The host is playing "' + playing + '". Do you want to join this room?';
+  }
+  function hideJoinAsk() { $('joinAsk').hidden = true; }
+
+  // The room list has one Join button per row, so "busy" means all of them.
+  let joinBusy = false;
+  function setJoinBusy(busy) {
+    joinBusy = busy;
+    document.querySelectorAll('.roomrow .btn').forEach(b => { b.disabled = busy; });
+    const r = $('btnRefresh');
+    if (r) r.disabled = busy;
+  }
+
+  /* ---------- guest audio helpers ---------- */
+  // Safari on iOS is the fussiest client for remote WebRTC audio: it refuses to
+  // start an un-muted stream without a tap, and the sound sometimes only leaves
+  // a plain <audio> element. Everything below is about making that work.
+  let remoteStream = null;
+  let remoteAudioEl = null;
+  let iosAudioRoute = false;
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let remoteMeter = null, remoteMeterCtx = null;
+
+  function effectiveMuted() { return iosAudioRoute && remoteAudioEl ? remoteAudioEl.muted : video.muted; }
+
+  function guestMeter(stream) {
+    try {
+      const tracks = stream.getAudioTracks();
+      if (!tracks.length) return null;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      if (!remoteMeterCtx) remoteMeterCtx = new AC();
+      if (remoteMeterCtx.state === 'suspended') remoteMeterCtx.resume().catch(() => {});
+      const src = remoteMeterCtx.createMediaStreamSource(new MediaStream(tracks));
+      const an = remoteMeterCtx.createAnalyser();
+      an.fftSize = 1024;
+      src.connect(an);
+      remoteMeter = an;
+      return an;
+    } catch (e) { return null; }
+  }
+
+  function levelDb(an) {
+    if (!an) return null;
+    const buf = new Uint8Array(an.fftSize);
+    an.getByteTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i] - 128); if (v > peak) peak = v; }
+    if (!peak) return '-inf';
+    return (20 * Math.log10(peak / 128)).toFixed(1);
+  }
+
+  function audioTrackInfo() {
+    // Safari exposes the tracks of a media element; Chrome does not.
+    try {
+      if (video.audioTracks && video.audioTracks.length) {
+        return 'file tracks: ' + Array.from(video.audioTracks).map(t => (t.label || t.language || 'track') + (t.enabled ? '' : ' (off)')).join(', ');
+      }
+    } catch (e) {}
+    return '';
+  }
+
+  function startGuestPlayback() {
+    setOverlay(null);
+    const p = video.play();
+    if (p && p.catch) p.catch(() => {
+      // iOS will not start a remote stream with sound before a tap. Do NOT
+      // quietly mute it - that is how the sound disappeared before. Start the
+      // picture muted and keep a "tap for sound" prompt on screen.
+      video.muted = true;
+      $('muteBtn').textContent = 'Unmute';
+      video.play().then(() => {
+        showBadge('Muted - tap Unmute for sound');
+        setOverlay('Tap for sound', 'One tap and the movie comes with sound.', true);
+      }).catch(() => setOverlay('Tap to start', 'Your browser needs a tap before it plays.', true));
+    });
+  }
+
+  // On iOS the sound of a remote track sometimes only leaves the <audio>
+  // element. We keep the same track in both elements; muting the <video>
+  // element does not silence the <audio> one.
+  function ensureRemoteAudioEl(stream) {
+    if (!isIOS) return null;
+    if (remoteAudioEl) return remoteAudioEl;
+    const tracks = stream.getAudioTracks();
+    if (!tracks.length) return null;
+    const a = document.createElement('audio');
+    a.autoplay = true; a.playsInline = true;
+    a.srcObject = new MediaStream(tracks);
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    remoteAudioEl = a;
+    return a;
+  }
+
+  let silentTicks = 0, silenceWarned = false;
+  function updateDiag() {
+    const el = $('diag');
+    if (!el) return;
+    if (isHost) {
+      const t = hostStream && hostStream.getAudioTracks()[0];
+      const lvl = levelDb(hostMeter);
+      if (t && !video.paused) {
+        if (lvl === '-inf' || lvl === null) silentTicks++; else silentTicks = 0;
+        if (silentTicks > 4 && !silenceWarned) {
+          silenceWarned = true;
+          addMsg('', 'The player is reading no audio from this file while it plays. The file may carry several audio tracks or an unusual codec - try another file, or re-mux the dialogue onto the first track.', true);
+        }
+      }
+      el.innerHTML = '<b>Host</b> audio: ' + (t ? (t.enabled ? 'enabled' : 'disabled') + ', ' + t.readyState : 'no audio track yet') +
+        ' | ctx: ' + (audioCtx ? audioCtx.state : 'none') +
+        ' | level: ' + (lvl || '-') + ' dB' +
+        ' | boost: ' + (useBoost ? 'on' : 'off') +
+        (audioTrackInfo() ? ' | ' + audioTrackInfo() : '');
+      return;
+    }
+    const t = remoteStream && remoteStream.getAudioTracks()[0];
+    if (!t) { el.innerHTML = '<b>Guest</b> audio: waiting for the host stream'; return; }
+    const line = '<b>Guest</b> audio: ' + (t.enabled ? 'enabled' : 'disabled') + ', ' + t.readyState +
+      ', muted=' + effectiveMuted() + ', playing=' + (!video.paused) +
+      ' | level: ' + (levelDb(remoteMeter) || '-') + ' dB' +
+      (remoteAudioEl ? ' | audio element: ' + (remoteAudioEl.paused ? 'paused' : 'playing') : '');
+    el.innerHTML = line;
+    const gd = $('guestDiag');
+    if (gd) gd.innerHTML = line;
+  }
   // iPhones ignore video.volume (volume is set with the side buttons), so hide the slider there
   (function () {
     const t = document.createElement('video');
@@ -653,29 +1624,48 @@
     if (t.volume === 1) $('vol').hidden = true;
   })();
 
-  async function startGuest() {
-    const code = $('roomCode').value.trim().toLowerCase().replace(PREFIX, '');
-    if (!code) { showError('Enter the room code from the host.'); return; }
+  async function startGuest(targetCode, hostLabel) {
+    const code = String(targetCode || '').trim().toLowerCase().replace(PREFIX, '');
+    if (!code) { showError('Pick a room from the list.'); return; }
     isHost = false;
     myName = ($('guestName').value.trim() || 'Guest');
+    if (hostLabel) joinAskHost = hostLabel;
     showError('');
-    $('btnJoin').disabled = true;
+    hideJoinAsk();
+    askMode = 'ask';
+    setJoinBusy(true);
 
     const opts = await getPeerOpts();
     if (peer) { try { peer.destroy(); } catch (e) {} }
     peer = new Peer(opts);
     let conn = null;
     let joined = false;
+    let denied = false;
     const fail = msg => {
       if (joined) return;
       clearTimeout(timer);
-      $('btnJoin').disabled = false;
+      clearTimeout(askTimer);
+      setJoinBusy(false);
+      hideJoinAsk();
       showError(msg);
       if (peer) { try { peer.destroy(); } catch (e) {} }
     };
     const timer = setTimeout(() => fail(hasTurn()
       ? 'Could not reach the host. Check the code, make sure the host page is open, then try again.'
       : 'Could not connect. If you are on a different network from the host, a TURN relay is needed: see the TURN SETTINGS near the top of the script.'), 20000);
+    // the host may take a while to answer - keep the connection alive meanwhile
+    const askTimer = setTimeout(() => {
+      if (!joined && askMode === 'waiting') {
+        askMode = 'declined';
+        $('joinAskTitle').textContent = 'No answer';
+        $('joinAskText').textContent = 'The host did not answer your request in time.';
+        $('joinAskErr').textContent = 'You can close this and try again.';
+        $('joinAskYes').hidden = true;
+        $('joinAskNo').hidden = false;
+        $('joinAskNo').textContent = 'Close';
+        setJoinBusy(false);
+      }
+    }, 120000);
 
     peer.on('open', () => {
       conn = peer.connect(PREFIX + code, { metadata: { name: myName }, reliable: true });
@@ -685,15 +1675,10 @@
         : 'Your network blocked the direct connection to the host. A TURN relay is needed: see the TURN SETTINGS near the top of the script.'));
 
       conn.on('open', () => {
-        joined = true;
         clearTimeout(timer);
-        enterRoom();
-        $('guestTools').hidden = false;
-        video.controls = false;
-        setStatus('Connected', 'live');
-        if (!video.srcObject) setOverlay('Waiting for the host', 'The movie will appear here when the host presses play.');
-        addMsg('', 'You joined room ' + code + '.', true);
-        keepAwake();
+        // Connected, but not in the room yet - the host has to accept first.
+        setStatus('Waiting for the host', 'paused');
+        showJoinAsk('');
       });
 
       conn.on('data', d => {
@@ -701,6 +1686,34 @@
         if (d.type === 'count') countPill.textContent = d.n + ' watching';
         else if (d.type === 'chat') addMsg(d.name, d.text);
         else if (d.type === 'sys') addMsg('', d.text, true);
+        else if (d.type === 'room-info') setJoinAskPlaying(d.playing);
+        else if (d.type === 'join-approve') {
+          joined = true;
+          clearTimeout(timer);
+          clearTimeout(askTimer);
+          hideJoinAsk();
+          enterRoom();
+          $('guestTools').hidden = false;
+          video.controls = false;
+          setStatus('Connected', 'live');
+          if (!video.srcObject) setOverlay('Waiting for the host', 'The movie will appear here when the host presses play.');
+          addMsg('', 'You joined room ' + code + '.', true);
+          keepAwake();
+        }
+        else if (d.type === 'join-deny') {
+          denied = true;
+          clearTimeout(askTimer);
+          askMode = 'declined';
+          setStatus('Not accepted', 'paused');
+          $('joinAskTitle').textContent = 'Request declined';
+          $('joinAskText').textContent = 'The host did not let you into this room.';
+          $('joinAskErr').textContent = d.reason || '';
+          $('joinAskYes').hidden = true;
+          $('joinAskNo').hidden = false;
+          $('joinAskNo').textContent = 'Close';
+          setJoinBusy(false);
+          try { conn.close(); } catch (e) {}
+        }
         else if (d.type === 'state') {
           if (d.playing) { setStatus('Playing', 'live'); showBadge(''); }
           else { setStatus('Paused by host', 'paused'); showBadge('Paused by host'); }
@@ -708,8 +1721,14 @@
       });
 
       conn.on('close', () => {
-        setStatus('Host left', 'paused');
-        setOverlay('The host left the room', 'Ask them for a new invite link.');
+        if (joined) {
+          setStatus('Host left', 'paused');
+          setOverlay('The host left the room', 'Ask them for a new invite link.');
+        } else if (!denied) {
+          setJoinBusy(false);
+          hideJoinAsk();
+          showError('The connection was closed before the host answered.');
+        }
       });
     });
 
@@ -717,17 +1736,16 @@
       call.answer();
       call.on('error', () => addMsg('', 'Video connection problem. Ask the host to press play again.', true));
       call.on('stream', stream => {
+        remoteStream = stream;
         video.srcObject = stream;
-        setOverlay(null);
+        video.playsInline = true;
         video.muted = false;
         $('muteBtn').textContent = 'Mute';
-        video.play().catch(() => {
-          // Sound autoplay blocked: start muted and ask for a tap
-          video.muted = true;
-          $('muteBtn').textContent = 'Unmute';
-          video.play().then(() => showBadge('Muted. Tap Unmute for sound'))
-            .catch(() => setOverlay('Tap to start', 'Your browser needs a tap before it plays.', true));
-        });
+        guestMeter(stream);
+        const a = ensureRemoteAudioEl(stream);
+        if (a) a.play().catch(() => {});
+        startGuestPlayback();
+        updateDiag();
       });
     });
 
@@ -740,22 +1758,67 @@
 
     // Guest controls (wired only once, even if joining is retried)
     if (!guestWired) { guestWired = true;
+    $('joinAskYes').addEventListener('click', () => {
+      if (askMode !== 'ask' || !guestConn || !guestConn.open) return;
+      askMode = 'waiting';
+      try { guestConn.send({ type: 'join-request', name: myName }); } catch (e) {}
+      $('joinAskTitle').textContent = 'Request sent';
+      $('joinAskText').textContent = 'Waiting for the host to let you in...';
+      $('joinAskErr').textContent = '';
+      $('joinAskYes').hidden = true;
+      $('joinAskNo').hidden = false;
+      $('joinAskNo').textContent = 'Cancel request';
+      setStatus('Waiting for the host', 'paused');
+    });
+    $('joinAskNo').addEventListener('click', () => {
+      if (askMode === 'declined') { hideJoinAsk(); askMode = 'ask'; showError(''); return; }
+      const wasWaiting = askMode === 'waiting';
+      if (wasWaiting) { try { guestConn.send({ type: 'join-cancel' }); } catch (e) {} }
+      try { guestConn.close(); } catch (e) {}
+      hideJoinAsk();
+      askMode = 'ask';
+      setJoinBusy(false);
+      if (peer) { try { peer.destroy(); } catch (e) {} }
+      showError(wasWaiting ? 'You cancelled the request.' : 'You did not join the room.');
+    });
     tapPlay.addEventListener('click', () => {
       video.muted = false;
+      if (remoteAudioEl) remoteAudioEl.muted = false;
       $('muteBtn').textContent = 'Mute';
-      video.play().then(() => { setOverlay(null); showBadge(''); }).catch(() => {});
+      showBadge('');
+      setOverlay(null);
+      video.play().catch(() => {});
+      if (remoteAudioEl) remoteAudioEl.play().catch(() => {});
     });
     $('vol').addEventListener('input', e => {
-      video.volume = parseFloat(e.target.value);
-      video.muted = video.volume === 0;
-      $('muteBtn').textContent = video.muted ? 'Unmute' : 'Mute';
+      const v = parseFloat(e.target.value);
+      video.volume = v;
+      video.muted = v === 0;
+      if (remoteAudioEl) { remoteAudioEl.volume = v; remoteAudioEl.muted = v === 0; }
+      $('muteBtn').textContent = effectiveMuted() ? 'Unmute' : 'Mute';
     });
     $('muteBtn').addEventListener('click', () => {
-      video.muted = !video.muted;
-      if (!video.muted) { showBadge(''); if (video.paused) video.play().catch(() => {}); }
-      $('muteBtn').textContent = video.muted ? 'Unmute' : 'Mute';
+      const m = !effectiveMuted();
+      video.muted = m;
+      if (remoteAudioEl) remoteAudioEl.muted = m;
+      if (!m) { showBadge(''); if (video.paused) video.play().catch(() => {}); }
+      $('muteBtn').textContent = m ? 'Unmute' : 'Mute';
     });
     $('fsBtn').addEventListener('click', toggleFullscreen);
+    if (isIOS) $('soundFix').hidden = false;
+    $('soundFix').addEventListener('click', () => {
+      iosAudioRoute = !iosAudioRoute;
+      if (iosAudioRoute) {
+        if (remoteAudioEl) { remoteAudioEl.muted = false; remoteAudioEl.play().catch(() => {}); }
+        video.muted = true;               // picture stays, sound comes from the audio element
+        showBadge('Sound routed through the audio element');
+      } else {
+        if (remoteAudioEl) remoteAudioEl.muted = true;
+        video.muted = false;
+        showBadge('');
+      }
+      $('muteBtn').textContent = effectiveMuted() ? 'Unmute' : 'Mute';
+    });
 
     // Double-tap (or double-click) the video for fullscreen
     let lastTap = 0;
@@ -767,8 +1830,15 @@
     });
 
     // Guests cannot pause the stream
+    let lastGuestResume = 0;
     video.addEventListener('pause', () => {
-      if (!isHost && video.srcObject && video.srcObject.active) video.play().catch(() => {});
+      if (isHost || !video.srcObject || !video.srcObject.active) return;
+      // iOS sometimes pauses the element on its own. Restart it, but not in a
+      // tight loop - restarting every few hundred ms makes the audio stutter.
+      const now = Date.now();
+      if (now - lastGuestResume < 900) return;
+      lastGuestResume = now;
+      video.play().catch(() => {});
     });
     }
   }
@@ -789,11 +1859,19 @@
 
   /* ---------- boot ---------- */
   $('btnHost').addEventListener('click', startHost);
-  $('btnJoin').addEventListener('click', startGuest);
-  $('roomCode').addEventListener('keydown', e => { if (e.key === 'Enter') startGuest(); });
+  $('btnRefresh').addEventListener('click', loadRoomList);
+  // keep the list fresh while the landing page is on screen
+  setInterval(() => { if (landing.style.display !== 'none' && !joinBusy) loadRoomList(); }, 25000);
+  loadRoomList();
 
+  setInterval(updateDiag, 1000);
+
+  // an invite link still works - it just skips the list
   const q = new URLSearchParams(location.search).get('room');
-  if (q) { $('roomCode').value = q; }
+  if (q) {
+    $('roomListNote').textContent = 'Joining the room from your invite link...';
+    startGuest(q, '');
+  }
 })();
 </script>
 </body>
