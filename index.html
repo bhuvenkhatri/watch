@@ -264,6 +264,33 @@
     .filebtn { width: 100%; justify-content: center; }
   }
 
+  /* ---------- big view ----------
+     iOS takes over a video element completely when you fullscreen it, and that
+     kills the canvas we use to capture it. This is our own fullscreen: the page
+     just lays itself out around the stage, so capture keeps running on every
+     device. */
+  body.bigview { overflow: hidden; }
+  body.bigview .topbar,
+  body.bigview .tools-area,
+  body.bigview .chat,
+  body.bigview #fixedNote { display: none !important; }
+  body.bigview .layout { padding: 0; gap: 0; grid-template-areas: "stage"; grid-template-columns: 1fr; }
+  body.bigview .stage-area {
+    position: fixed; inset: 0; z-index: 50; background: #000;
+    padding: 0; display: grid; place-items: center;
+  }
+  body.bigview .stage {
+    aspect-ratio: auto; width: 100%; height: 100%;
+    border: 0; border-radius: 0; border-left: 0; border-right: 0;
+  }
+  body.bigview .stage video { object-fit: contain; }
+  #bigExit {
+    position: fixed; z-index: 60; right: calc(var(--sar) + 12px);
+    top: calc(var(--sat) + 12px); display: none;
+    background: rgba(38, 35, 58, .92);
+  }
+  body.bigview #bigExit { display: inline-flex; align-items: center; }
+
   /* Phone held sideways: video takes the whole screen height */
   @media (max-width: 950px) and (max-height: 500px) and (orientation: landscape) {
     .stage { aspect-ratio: auto; height: 100vh; height: 100dvh; }
@@ -320,7 +347,9 @@
     <span class="brand">Watch Party</span>
     <span class="pill"><span class="dot" id="statusDot"></span><span id="statusText">Connecting…</span></span>
     <span class="pill" id="countPill">1 watching</span>
+    <button class="btn" id="leaveBtn" hidden>Leave</button>
   </div>
+  <button class="btn" id="bigExit" hidden>Exit big view</button>
 
   <div class="layout">
     <div class="stage-area">
@@ -346,9 +375,16 @@
               <input type="file" id="fileInput" accept="video/*,audio/*">
             </label>
             <button class="btn" id="hostFs">Fullscreen</button>
+            <button class="btn" id="hostBig">Big view</button>
             <span class="grow" id="fileName">No file selected. Use the player controls to play, pause and seek. Guests follow you.</span>
             <label class="chk"><input type="checkbox" id="tapAudio" checked> WebAudio audio</label>
             <label class="chk"><input type="checkbox" id="boost" checked> Boost dialogue</label>
+            <select class="sel" id="quality" title="Picture quality sent to guests">
+              <option value="1280">Picture: 720p</option>
+              <option value="854">Picture: 480p</option>
+              <option value="640">Picture: 360p (weak uplink)</option>
+              <option value="1920">Picture: 1080p</option>
+            </select>
           </div>
           <div class="share" style="margin-top:12px">
             <code id="shareLink"></code>
@@ -380,11 +416,12 @@
         <!-- Guest tools -->
         <div id="guestTools" hidden>
           <div class="under">
-            <span class="grow">The host controls playback. Double-tap the video for fullscreen.</span>
+            <span class="grow">The host controls playback. Use Big view to fill the screen.</span>
             <div class="guest-controls">
               <button class="btn" id="muteBtn">Mute</button>
               <input type="range" id="vol" min="0" max="1" step="0.05" value="1" aria-label="Volume">
               <button class="btn" id="fsBtn">Fullscreen</button>
+              <button class="btn" id="bigBtn">Big view</button>
               <button class="btn" id="soundFix" hidden>Sound fix</button>
             </div>
             <span class="diag" id="guestDiag" style="margin-top:0"></span>
@@ -421,6 +458,26 @@
   let guestConn = null;
   let guestWired = false;
   let myCode = '';
+
+  // Safari on iOS is the awkward client in this app: no captureStream() on a
+  // media element, no audioTracks switching, a fussy autoplay policy and an
+  // audio engine that suspends on its own. Declared up here because both the
+  // host and the guest side need it.
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  /* ---------- session memory ----------------------------------------------
+     A big file makes a phone reload the tab (the OS kills it for memory). When
+     that happens the user should land back in the same room, not on the home
+     page. We remember which room we were in and rejoin it on load. The video
+     file itself cannot be remembered - a page may not re-open a file from disk
+     on its own - so the host is asked to pick it again. */
+  const SESS_KEY = 'wparty.session.v1';
+  function saveSession(o) { try { sessionStorage.setItem(SESS_KEY, JSON.stringify(o)); } catch (e) {} }
+  function readSession() {
+    try { const v = sessionStorage.getItem(SESS_KEY); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+  }
+  function clearSession() { try { sessionStorage.removeItem(SESS_KEY); } catch (e) {} }
 
   /* =========================================================
      LOBBY  (the room list)
@@ -712,6 +769,9 @@
     statusDot.className = 'dot' + (kind ? ' ' + kind : '');
   }
   function setOverlay(title, text, withButton) {
+    // any previous "rejoin" button belongs to the overlay that is going away
+    const rb = document.getElementById('rejoinBtn');
+    if (rb) rb.remove();
     if (!title) { overlay.hidden = true; tapPlay.hidden = true; return; }
     overlay.hidden = false;
     overlayTitle.textContent = title;
@@ -733,6 +793,7 @@
   function enterRoom() {
     landing.style.display = 'none';
     room.classList.add('on');
+    $('leaveBtn').hidden = false;
     window.scrollTo(0, 0);
   }
   function randomCode() {
@@ -766,6 +827,17 @@
   }
   document.addEventListener('fullscreenchange', onFsChange);
   document.addEventListener('webkitfullscreenchange', onFsChange);
+
+  /* ---------- our own fullscreen (safe for capture) ---------- */
+  function setBigView(on) {
+    document.body.classList.toggle('bigview', on);
+    $('bigExit').hidden = !on;
+    if (on) { try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch (e) {} }
+    else { try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {} }
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.body.classList.contains('bigview')) setBigView(false);
+  });
 
   /* ---------- keep the screen awake while watching ---------- */
   let wakeLock = null;
@@ -950,6 +1022,49 @@
     tapComp.ratio.value = useBoost ? 5 : 1;
   }
 
+  /* ---------- how big a picture we send -----------------------------------
+     Guests get a re-drawn picture, so this is a bandwidth choice. A phone
+     uplink usually cannot hold 720p, and a home broadband can. The host picks;
+     the default leans small on a phone. */
+  let captureW = 0;   // 0 means "decide from the device"
+  function captureWidth() {
+    if (captureW) return captureW;
+    return isIOS ? 854 : 1280;
+  }
+
+  function drawOnce(f) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh || video.paused || video.ended || video.readyState < 2) return false;
+    const k = Math.min(1, captureWidth() / vw);
+    const w = Math.round(vw * k), h = Math.round(vh * k);
+    if (f.cv.width !== w || f.cv.height !== h) { f.cv.width = w; f.cv.height = h; }
+    try { f.g.drawImage(video, 0, 0, w, h); } catch (e) { return false; }
+    f.lastDraw = Date.now();
+    return true;
+  }
+
+  function startFramePump(f) {
+    if (f.pumpStarted) return;
+    f.pumpStarted = true;
+    // requestVideoFrameCallback fires once per decoded frame and keeps working
+    // in cases where requestAnimationFrame is throttled, so prefer it.
+    const hasRvfc = typeof video.requestVideoFrameCallback === 'function';
+    const step = () => {
+      drawOnce(f);
+      if (hasRvfc) f.rvfcId = video.requestVideoFrameCallback(step);
+      else f.rafId = requestAnimationFrame(step);
+    };
+    if (hasRvfc) f.rvfcId = video.requestVideoFrameCallback(step);
+    else f.rafId = requestAnimationFrame(step);
+    // Safety net. iOS throttles the frame callbacks when the screen dims or the
+    // tab loses focus, and a stalled drawing loop looks like a frozen movie to
+    // the guests. If nothing has been drawn for a while, draw anyway.
+    f.timer = setInterval(() => {
+      if (document.hidden && !isIOS) return;
+      if (Date.now() - (f.lastDraw || 0) > 260) drawOnce(f);
+    }, 120);
+  }
+
   function prepareFallback() {
     if (fb) { if (fb.ac.state === 'suspended') fb.ac.resume().catch(() => {}); return fb; }
     const cv = document.createElement('canvas');
@@ -958,21 +1073,26 @@
     const tap = ensureAudioTap();
     if (!tap) return null;
     const ac = audioCtx;
-    fb = { cv, g, ac, dest: tap };
-    const MAXW = 960;                                 // keep it light for phone uplinks
-    const draw = () => {
-      if (video.videoWidth && !video.paused && !video.ended && video.readyState >= 2) {
-        const k = Math.min(1, MAXW / video.videoWidth);
-        const w = Math.round(video.videoWidth * k), h = Math.round(video.videoHeight * k);
-        if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-        try { g.drawImage(video, 0, 0, w, h); } catch (e) {}
-      }
-      requestAnimationFrame(draw);
-    };
-    requestAnimationFrame(draw);
+    fb = { cv, g, ac, dest: tap, lastDraw: 0, pumpStarted: false };
+    startFramePump(fb);
     if (ac.state === 'suspended') ac.resume().catch(() => {});
     return fb;
   }
+  let captureWarned = false;
+  function announceCaptureHealth(stream) {
+    if (captureWarned) return;
+    if (!stream.getAudioTracks().length) {
+      captureWarned = true;
+      if (isIOS) {
+        // On iOS the canvas path has no audio of its own - it relies entirely on
+        // the WebAudio tap. If the tap did not come up there is nothing to send.
+        addMsg('', 'No sound could be captured from this device. Make sure the "WebAudio audio" box is ticked, then pause and press play again. If it still fails, host from a computer - an iPhone can always join.', true);
+      } else {
+        addMsg('', 'No sound could be captured from this device, so guests hear nothing. Try another file, or host from a computer.', true);
+      }
+    }
+  }
+
   function captureHostStream() {
     const vid = video.captureStream ? video.captureStream()
               : (video.mozCaptureStream ? video.mozCaptureStream() : null);
@@ -998,13 +1118,15 @@
     return stream;
   }
 
-  async function startHost() {
+  async function startHost(restoreCode, attempt) {
     isHost = true;
+    attempt = attempt || 0;
+    const restored = !!restoreCode;
     myName = ($('hostName').value.trim() || 'Host');
     // Unlock the AudioContext while we are still inside the user's tap - Chrome
     // only lets an AudioContext start inside a tap.
     ensureAudioCtx();
-    myCode = randomCode();
+    myCode = restoreCode || randomCode();
     const opts = await getPeerOpts();
     peer = new Peer(PREFIX + myCode, opts);
     let opened = false;
@@ -1013,6 +1135,7 @@
       if (opened) { setStatus('Live', 'live'); return; }   // fired again after a reconnect
       opened = true;
       enterRoom();
+      saveSession({ role: 'host', name: myName, code: myCode });
       $('hostTools').hidden = false;
       video.controls = true;
       const link = location.href.split('#')[0].split('?')[0] + '?room=' + myCode;
@@ -1039,7 +1162,12 @@
         setTimeout(() => $('copyLink').textContent = label, 1800);
       };
       setStatus('Live', 'live');
-      addMsg('', 'Room created. It is in the room list now - anyone can pick it. The invite link below is just a shortcut.', true);
+      if (restored) {
+        addMsg('', 'You are back in your room with the same code. Pick your video file again to resume.', true);
+        setOverlay('Pick your video file again', 'The page reloaded, so the movie needs to be chosen once more.');
+      } else {
+        addMsg('', 'Room created. It is in the room list now - anyone can pick it. The invite link below is just a shortcut.', true);
+      }
       joinLobby();
 
       if (!canCapture()) {
@@ -1055,7 +1183,16 @@
     });
 
     peer.on('error', err => {
-      if (err.type === 'unavailable-id') { peer.destroy(); startHost(); return; }
+      if (err.type === 'unavailable-id') {
+        // After a refresh our old peer can still be held by the signalling
+        // server for a moment. Keep the SAME code so the room survives, and only
+        // fall back to a fresh code when the server really keeps refusing.
+        peer.destroy();
+        const keep = myCode;
+        if (attempt < 3) setTimeout(() => startHost(keep, attempt + 1), 700 * (attempt + 1));
+        else { clearSession(); setTimeout(() => startHost(), 400); }
+        return;
+      }
       if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
         setStatus('Reconnecting…', 'paused');
         setTimeout(() => { if (peer && peer.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } }, 2000);
@@ -1114,11 +1251,39 @@
     });
 
     $('hostFs').addEventListener('click', toggleFullscreen);
+    $('hostBig').addEventListener('click', () => setBigView(!document.body.classList.contains('bigview')));
+    // On iOS, letting the browser fullscreen the video hands rendering to the
+    // native player and the canvas stops receiving frames. Big view is the safe
+    // way to fill the screen there, so steer the host to it.
+    if (isIOS) {
+      $('hostFs').hidden = true;
+      addMsg('', 'On an iPhone use Big view instead of Fullscreen - the browser fullscreen stops the picture being sent to your guests.', true);
+    }
     const tapChk = $('tapAudio');
     if (tapChk) tapChk.addEventListener('change', e => { useTapAudio = e.target.checked; });
     $('remuxBtn').addEventListener('click', () => rebuildFile($('trackSel').value || '0'));
     const boostChk = $('boost');
     if (boostChk) boostChk.addEventListener('change', e => { useBoost = e.target.checked; applyBoost(); });
+    const qSel = $('quality');
+    if (qSel) {
+      // a phone has a smaller uplink, so start there rather than at the top
+      qSel.value = isIOS ? '854' : '1280';
+      captureW = parseInt(qSel.value, 10) || 0;
+      qSel.addEventListener('change', e => {
+        captureW = parseInt(e.target.value, 10) || 0;
+        // the running stream keeps its old size, so renegotiate it
+        if (hostStream) {
+          calls.forEach(c => { try { c.close(); } catch (err) {} });
+          calls.clear();
+          hostStream = null;
+          if (!video.paused) {
+            hostStream = captureHostStream();
+            if (hostStream) { announceCaptureHealth(hostStream); conns.forEach((c, id) => callGuest(id)); }
+          }
+        }
+        addMsg('', 'Picture quality is now ' + e.target.options[e.target.selectedIndex].text.replace('Picture: ', '') + '.', true);
+      });
+    }
 
     // File chosen
     $('fileInput').addEventListener('change', e => {
@@ -1150,10 +1315,24 @@
       if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
       if (!hostStream || hostStream.getTracks().length === 0) {
         hostStream = captureHostStream();
-        if (!hostStream) return;
+        if (!hostStream) {
+          setOverlay('This browser will not let us capture the video', 'Host from a computer instead - this device can still join a room.');
+          addMsg('', 'This browser refused to capture the video, so guests cannot see or hear it.', true);
+          return;
+        }
+        announceCaptureHealth(hostStream);
         conns.forEach((c, id) => callGuest(id));
       }
     });
+    // Hosting from a phone draws the picture frame by frame, so losing the
+    // foreground freezes what the guests see. Tell the host plainly.
+    document.addEventListener('visibilitychange', () => {
+      if (!isHost || isIOS || canCaptureNative()) return;
+      if (document.hidden && !video.paused && conns.size) {
+        addMsg('', 'You switched away from this tab, so the guests picture is frozen until you come back.', true);
+      }
+    });
+
     video.addEventListener('play',  () => { setStatus('Playing', 'live');  broadcast({ type: 'state', playing: true });  });
     video.addEventListener('pause', () => { setStatus('Paused', 'paused'); broadcast({ type: 'state', playing: false }); });
     video.addEventListener('ended', () => { setStatus('Finished', 'paused'); broadcast({ type: 'state', playing: false }); });
@@ -1176,6 +1355,63 @@
   let currentFile = null;
   let rebuiltBlob = null;
   let audioTracks = [];
+
+  /* ---------- read ONLY the header -----------------------------------------
+     Never read the whole file. A 3.5 GB movie turns into a 3.5 GB ArrayBuffer,
+     which a phone cannot hold - the OS kills the tab and the page reloads.
+     The track list lives in the 'moov' box, so we read a few megabytes off the
+     front (files written with faststart) or off the back (everything else). */
+  function fmtSize(n) {
+    if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
+    if (n >= 1048576) return (n / 1048576).toFixed(0) + ' MB';
+    return (n / 1024).toFixed(0) + ' KB';
+  }
+
+  function scanTop(b) {
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    let o = 0;
+    while (o + 8 <= b.length) {
+      let size = dv.getUint32(o);
+      const t = String.fromCharCode(b[o + 4], b[o + 5], b[o + 6], b[o + 7]);
+      let hdr = 8;
+      if (size === 1) {
+        if (o + 16 > b.length) return { start: -1, needMore: true };
+        size = Number(dv.getBigUint64(o + 8)); hdr = 16;
+      } else if (size === 0) size = b.length - o;
+      if (size < hdr) return { start: -1, needMore: false };
+      if (t === 'moov') {
+        if (o + size > b.length) return { start: -1, needMore: true };
+        return { start: o, size, needMore: false };
+      }
+      if (o + size > b.length) return { start: -1, needMore: true };
+      o += size;
+    }
+    return { start: -1, needMore: false };
+  }
+
+  function scanTail(b) {
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    for (let i = 4; i + 4 <= b.length; i++) {
+      if (b[i] === 0x6d && b[i + 1] === 0x6f && b[i + 2] === 0x6f && b[i + 3] === 0x76) {
+        const size = dv.getUint32(i - 4);
+        if (size >= 8 && (i - 4) + size <= b.length) return b.slice(i - 4, (i - 4) + size).buffer;
+      }
+    }
+    return null;
+  }
+
+  async function findMoov(file) {
+    for (const want of [1 << 20, 4 << 20, 16 << 20]) {
+      const n = Math.min(want, file.size);
+      const b = new Uint8Array(await file.slice(0, n).arrayBuffer());
+      const r = scanTop(b);
+      if (r.start >= 0) return b.slice(r.start, r.start + r.size).buffer;
+      if (!r.needMore) break;      // ran into mdat: the header is at the end
+    }
+    const tailN = Math.min(8 << 20, file.size);
+    const tail = new Uint8Array(await file.slice(file.size - tailN, file.size).arrayBuffer());
+    return scanTail(tail);
+  }
 
   /* ---------- pure JS MP4/MOV box parser ---------- */
   function parseContainerTracks(buf) {
@@ -1338,6 +1574,10 @@
     row.hidden = false;
   }
 
+  // ffmpeg.wasm cannot hold a file much bigger than this: the wasm heap tops
+  // out and the tab dies. Above the cap we hand over a command line instead.
+  function rebuildCap() { return isIOS ? 250 * 1048576 : 900 * 1048576; }
+
   async function inspectCurrentFile() {
     const panel = $('fixPanel');
     if (!currentFile) { panel.hidden = true; return; }
@@ -1345,13 +1585,31 @@
     $('remuxRow').hidden = true;
     $('trackTable').hidden = true;
     $('fixWarn').hidden = true;
-    $('fixNote').textContent = 'Reading ' + currentFile.name + '...';
-    const buf = await currentFile.arrayBuffer();
-    const parsed = parseContainerTracks(buf);
+    $('cliHint').hidden = true;
+    $('fixNote').textContent = 'Reading ' + currentFile.name + ' (' + fmtSize(currentFile.size) + ')...';
+    let parsed = null;
+    try {
+      // only the header, never the whole file
+      const moov = await findMoov(currentFile);
+      if (moov) parsed = parseContainerTracks(moov);
+    } catch (e) {
+      console.warn('header read failed', e);
+    }
+    if (currentFile.size > rebuildCap()) {
+      $('remuxBtn').disabled = true;
+      $('remuxInfo').textContent = 'This file is ' + fmtSize(currentFile.size) +
+        '. The in-browser video tool cannot hold a file that big - trying it would run the tab out of memory. Use the ffmpeg command below on a computer.';
+    } else {
+      $('remuxBtn').disabled = false;
+      $('remuxInfo').textContent = '';
+    }
     if (!parsed) {
       renderTracks([], 'This is not an MP4/MOV container, so the track list could not be read in the browser. Use the rebuild button - ffmpeg will find the tracks.', '');
-      $('remuxRow').hidden = false;
-      $('trackSel').innerHTML = '<option value="0">Let ffmpeg pick the first audio track</option>';
+      if (currentFile.size <= rebuildCap()) {
+        $('remuxRow').hidden = false;
+        $('trackSel').innerHTML = '<option value="0">Let ffmpeg pick the first audio track</option>';
+      }
+      showCliHint();
       return;
     }
     const audio = parsed.filter(t => t.handler === 'soun');
@@ -1404,6 +1662,14 @@
   async function rebuildFile(trackSel) {
     if (!currentFile) return;
     const info = $('remuxInfo');
+    if (currentFile.size > rebuildCap()) {
+      // Reading this into the wasm heap would kill the tab. This is the same
+      // wall that used to make the page reload on big files.
+      info.textContent = 'This file is too big for the in-browser tool (' + fmtSize(currentFile.size) +
+        '). Use the ffmpeg command below on a computer.';
+      showCliHint();
+      return;
+    }
     info.textContent = 'Loading the video tool (about 30 MB, once)...';
     $('remuxBtn').disabled = true;
     try {
@@ -1412,7 +1678,10 @@
       });
       const ext = (currentFile.name.split('.').pop() || 'mkv').toLowerCase();
       const inName = 'in.' + (ext.length <= 4 ? ext : 'mp4');
-      info.textContent = 'Reading the file...';
+      info.textContent = 'Reading the file (' + fmtSize(currentFile.size) + ')...';
+      // arrayBuffer() makes exactly one copy of the file; the Uint8Array is only
+      // a view over it. Do not build an extra buffer on top - on a phone the
+      // memory has to be spent once.
       await ff.writeFile(inName, new Uint8Array(await currentFile.arrayBuffer()));
       const mapArgs = n => ['-i', inName, '-map', '0:v:0', '-map', '0:a:' + n,
                             '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
@@ -1494,6 +1763,25 @@
   }
   function hideJoinAsk() { $('joinAsk').hidden = true; }
 
+  // A button on top of the stage that rejoins the room we were already in.
+  function showRejoin(code) {
+    const ov = $('overlay');
+    if (!ov || ov.hidden) return;
+    let btn = $('rejoinBtn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.className = 'btn primary';
+      btn.id = 'rejoinBtn';
+      btn.textContent = 'Rejoin the room';
+      ov.querySelector('div').appendChild(btn);
+      btn.addEventListener('click', () => {
+        btn.remove();
+        setOverlay(null);
+        startGuest(code, '');
+      });
+    }
+  }
+
   // The room list has one Join button per row, so "busy" means all of them.
   let joinBusy = false;
   function setJoinBusy(busy) {
@@ -1510,8 +1798,6 @@
   let remoteStream = null;
   let remoteAudioEl = null;
   let iosAudioRoute = false;
-  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   let remoteMeter = null, remoteMeterCtx = null;
 
   function effectiveMuted() { return iosAudioRoute && remoteAudioEl ? remoteAudioEl.muted : video.muted; }
@@ -1587,6 +1873,7 @@
   }
 
   let silentTicks = 0, silenceWarned = false;
+  let suspendTicks = 0, suspendWarned = false;
   function updateDiag() {
     const el = $('diag');
     if (!el) return;
@@ -1604,7 +1891,17 @@
         ' | ctx: ' + (audioCtx ? audioCtx.state : 'none') +
         ' | level: ' + (lvl || '-') + ' dB' +
         ' | boost: ' + (useBoost ? 'on' : 'off') +
+        ' | picture: ' + captureWidth() + 'px' +
         (audioTrackInfo() ? ' | ' + audioTrackInfo() : '');
+      // A suspended AudioContext is THE reason an iPhone host goes silent: the
+      // element plays through WebAudio, so guests lose the sound with it.
+      if (isIOS && audioCtx && audioCtx.state === 'suspended' && !video.paused) {
+        suspendTicks++;
+        if (suspendTicks > 3 && !suspendWarned) {
+          suspendWarned = true;
+          addMsg('', 'The iPhone paused its audio engine, which is why the guests went quiet. Tap the video once to wake it. If this keeps happening, keep this tab in the foreground.', true);
+        }
+      } else suspendTicks = 0;
       return;
     }
     const t = remoteStream && remoteStream.getAudioTracks()[0];
@@ -1676,6 +1973,8 @@
 
       conn.on('open', () => {
         clearTimeout(timer);
+        const rb = $('rejoinBtn');
+        if (rb) rb.remove();
         // Connected, but not in the room yet - the host has to accept first.
         setStatus('Waiting for the host', 'paused');
         showJoinAsk('');
@@ -1693,6 +1992,7 @@
           clearTimeout(askTimer);
           hideJoinAsk();
           enterRoom();
+          saveSession({ role: 'guest', name: myName, code: code, host: joinAskHost || '' });
           $('guestTools').hidden = false;
           video.controls = false;
           setStatus('Connected', 'live');
@@ -1722,8 +2022,11 @@
 
       conn.on('close', () => {
         if (joined) {
-          setStatus('Host left', 'paused');
-          setOverlay('The host left the room', 'Ask them for a new invite link.');
+          setStatus('Disconnected', 'paused');
+          // The host may just have reloaded the page - they come back on the
+          // same room code, so offer to walk straight back in.
+          setOverlay('The connection dropped', 'The host may have reloaded. You can try to rejoin the same room.', false);
+          showRejoin(code);
         } else if (!denied) {
           setJoinBusy(false);
           hideJoinAsk();
@@ -1778,6 +2081,7 @@
       hideJoinAsk();
       askMode = 'ask';
       setJoinBusy(false);
+      clearSession();
       if (peer) { try { peer.destroy(); } catch (e) {} }
       showError(wasWaiting ? 'You cancelled the request.' : 'You did not join the room.');
     });
@@ -1805,6 +2109,8 @@
       $('muteBtn').textContent = m ? 'Unmute' : 'Mute';
     });
     $('fsBtn').addEventListener('click', toggleFullscreen);
+    $('bigBtn').addEventListener('click', () => setBigView(!document.body.classList.contains('bigview')));
+    $('bigExit').addEventListener('click', () => setBigView(false));
     if (isIOS) $('soundFix').hidden = false;
     $('soundFix').addEventListener('click', () => {
       iosAudioRoute = !iosAudioRoute;
@@ -1858,19 +2164,45 @@
   });
 
   /* ---------- boot ---------- */
-  $('btnHost').addEventListener('click', startHost);
+  // iOS parks the AudioContext the moment it feels like it. Nudge it back on
+  // every touch and once a second while the host is playing, otherwise the tap
+  // goes quiet and the guests lose the sound mid-movie.
+  document.addEventListener('pointerdown', () => {
+    if (isHost && audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  }, true);
+  setInterval(() => {
+    if (isHost && audioCtx && audioCtx.state === 'suspended' && !video.paused) {
+      audioCtx.resume().catch(() => {});
+    }
+  }, 1000);
+
+  $('leaveBtn').addEventListener('click', () => { clearSession(); location.reload(); });
+  $('btnHost').addEventListener('click', () => startHost());
   $('btnRefresh').addEventListener('click', loadRoomList);
   // keep the list fresh while the landing page is on screen
   setInterval(() => { if (landing.style.display !== 'none' && !joinBusy) loadRoomList(); }, 25000);
-  loadRoomList();
 
   setInterval(updateDiag, 1000);
 
-  // an invite link still works - it just skips the list
+  // an invite link still works - it just skips the list. It wins over the
+  // remembered session, because opening a link is an explicit choice.
   const q = new URLSearchParams(location.search).get('room');
+  const sess = readSession();
+  // Do not poll the room list when we are walking straight back into a room -
+  // that would open a second connection to the signalling server for nothing.
+  const restoring = !!(sess && sess.code && !q);
+  if (!restoring) loadRoomList();
   if (q) {
     $('roomListNote').textContent = 'Joining the room from your invite link...';
     startGuest(q, '');
+  } else if (sess && sess.code && sess.role === 'host') {
+    $('hostName').value = sess.name || '';
+    $('roomListNote').textContent = 'Back in your room. Pick your video file again.';
+    startHost(sess.code);
+  } else if (sess && sess.code && sess.role === 'guest') {
+    $('guestName').value = sess.name || '';
+    $('roomListNote').textContent = 'Rejoining the room you were in...';
+    startGuest(sess.code, sess.host || '');
   }
 })();
 </script>
